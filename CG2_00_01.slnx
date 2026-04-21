@@ -1,0 +1,9 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/ソリューション項目/">
+    <File Path=".editorconfig" />
+  </Folder>
+  <Project Path="CG2_00_01/CG2_00_01.vcxproj" Id="b605453e-bce3-4df9-92cf-d6be6397a644" />
+</Solution>
