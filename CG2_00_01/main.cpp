@@ -2,6 +2,13 @@
 #include <cstdint>
 #include <string>
 #include <format>
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <cassert>
+
+#pragma comment(lib, "d3d12.lib")
+#pragma comment(lib, "dxgi.lib")
+
 
 std::wstring ConvertString(const std::string& str) {
     if (str.empty()) return std::wstring();
@@ -29,7 +36,6 @@ void Log(const std::wstring& message) {
     Log(ConvertString(message));
 }
 
-
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_DESTROY) {
         PostQuitMessage(0);
@@ -41,22 +47,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
     
-    Log(L"Hello, DirectX!\n");
-
     const int32_t windowWidth = 1280;
     const int32_t windowHeight = 720;
 
-    int enemyHp = 10;
-    std::string texturePath = "rock.png";
-
-  
-
-    Log(std::format("enemyHp:{}, texturePath:{}\n", enemyHp, texturePath));    
-    //Log(std::format("enemyHp:{}, texturePath:{}\n", enemyHp));
-
-  std::wstring windowSizeLog = std::format(L"Window size: {}x{}\n", windowWidth, windowHeight);
-    Log(windowSizeLog);
-    
     WNDCLASS wc{};
     wc.lpfnWndProc = WndProc;
     wc.lpszClassName = L"CG2WindowClass";
@@ -75,6 +68,44 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
 
     ShowWindow(hwnd, SW_SHOW);
 
+    
+    IDXGIFactory7* dxgiFactory = nullptr;
+    HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&dxgiFactory));
+    assert(SUCCEEDED(hr));
+
+    
+    IDXGIAdapter4* useAdapter = nullptr;
+    for (UINT i = 0; dxgiFactory->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&useAdapter)) != DXGI_ERROR_NOT_FOUND; ++i) {
+        DXGI_ADAPTER_DESC3 adapterDesc{};
+        hr = useAdapter->GetDesc3(&adapterDesc);
+        assert(SUCCEEDED(hr));
+
+        if (!(adapterDesc.Flags & DXGI_ADAPTER_FLAG3_SOFTWARE)) {
+            Log(std::format(L"Use Adapter: {}\n", adapterDesc.Description));
+            break;
+        }
+        useAdapter = nullptr;
+    }
+    assert(useAdapter != nullptr);
+
+    
+    ID3D12Device* device = nullptr;
+    D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL_12_2, D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_12_0
+    };
+    const char* featureLevelStrings[] = { "12.2", "12.1", "12.0" };
+
+    for (size_t i = 0; i < _countof(featureLevels); ++i) {
+        hr = D3D12CreateDevice(useAdapter, featureLevels[i], IID_PPV_ARGS(&device));
+        if (SUCCEEDED(hr)) {
+            Log(std::format("FeatureLevel: {}\n", featureLevelStrings[i]));
+            break;
+        }
+    }
+    assert(device != nullptr);
+    Log("Complete create D3D12Device!!!\n");
+
+    
     MSG msg{};
     while (msg.message != WM_QUIT) {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
