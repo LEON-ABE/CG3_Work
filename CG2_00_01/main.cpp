@@ -49,12 +49,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     int enemyHp = 10;
     std::string texturePath = "rock.png";
 
-    std::wstring windowSizeLog = std::format(L"Window size: {}x{}\n", windowWidth, windowHeight);
-    Log(windowSizeLog);
+  
 
     Log(std::format("enemyHp:{}, texturePath:{}\n", enemyHp, texturePath));    
     //Log(std::format("enemyHp:{}, texturePath:{}\n", enemyHp));
 
+  std::wstring windowSizeLog = std::format(L"Window size: {}x{}\n", windowWidth, windowHeight);
+    Log(windowSizeLog);
     
     WNDCLASS wc{};
     wc.lpfnWndProc = WndProc;
