@@ -38,17 +38,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return DefWindowProc(hWnd, msg, wParam, lParam);
 }
 
-
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
-
+    
     Log(L"Hello, DirectX!\n");
 
     const int32_t windowWidth = 1280;
     const int32_t windowHeight = 720;
 
-    Log(std::format(L"Window size: {}x{}\n", windowWidth, windowHeight));
+    
+    std::wstring windowSizeLog = std::format(L"Window size: {}x{}\n", windowWidth, windowHeight);
+    Log(windowSizeLog);
 
+    
     WNDCLASS wc{};
     wc.lpfnWndProc = WndProc;
     wc.lpszClassName = L"CG2WindowClass";
@@ -66,6 +68,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     );
 
     ShowWindow(hwnd, SW_SHOW);
+
     MSG msg{};
     while (msg.message != WM_QUIT) {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -73,5 +76,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
             DispatchMessage(&msg);
         }
     }
+
     return 0;
 }
