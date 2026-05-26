@@ -5,10 +5,34 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <cassert>
+#include<dbghelp.h>
+#include <strsafe.h>
 
+#pragma comment(lib, "Dbghelp.lib")
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 
+static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
+    
+    SYSTEMTIME time;
+	GetLocalTime(&time);
+	wchar_t filePath[MAX_PATH] = {0};
+    CreateDirectory(L"./Dumps", nullptr);
+    StringCchPrintfW(filePath, MAX_PATH, L"./Dumps/%04d-%02d%02d-%02d%02d.dmp", time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute);
+    HANDLE dumpFileHandle = CreateFile(filePath, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_READ, 0 , CREATE_ALWAYS, 0 , 0 );
+
+	DWORD processId = GetCurrentProcessId();
+	DWORD threadId = GetCurrentThreadId();
+
+    MINIDUMP_EXCEPTION_INFORMATION minidumpInformation{ 0 };
+	minidumpInformation.ThreadId = threadId;
+	minidumpInformation.ExceptionPointers = exception;
+    minidumpInformation.ClientPointers = TRUE;
+
+    MiniDumpWriteDump(GetCurrentProcess(),processId,dumpFileHandle,MiniDumpNormal,&minidumpInformation,nullptr,nullptr);
+
+    return EXCEPTION_EXECUTE_HANDLER;
+}
 
 std::wstring ConvertString(const std::string& str) {
     if (str.empty()) return std::wstring();
@@ -46,7 +70,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int) {
 
-    
+	SetUnhandledExceptionFilter(ExportDump);
+
     const int32_t windowWidth = 1280;
     const int32_t windowHeight = 720;
 
