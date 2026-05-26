@@ -29,8 +29,7 @@ static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
     minidumpInformation.ClientPointers = TRUE;
 
     MiniDumpWriteDump(GetCurrentProcess(), processId, dumpFileHandle, MiniDumpNormal, &minidumpInformation, nullptr, nullptr);
-    CloseHandle(dumpFileHandle);
-
+   
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -107,7 +106,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
             break;
         }
 
-        useAdapter->Release();
         useAdapter = nullptr;
     }
     assert(useAdapter != nullptr);
