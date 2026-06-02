@@ -1,5 +1,5 @@
-[*.{cpp,h}]
-charset = ult-8
+[*.{ cpp, h, hlsl, hlsli}]
+charset = utf-8
 
 #スペルミスをintellisense上での「エラー」として扱う
 spelling_error_severity = error
@@ -14,5 +14,3 @@ spelling_exclusion_path = ./exclusion.dic
 
 *.dmp
 Dumps/
-
-
