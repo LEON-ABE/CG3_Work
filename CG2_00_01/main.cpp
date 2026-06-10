@@ -11,12 +11,20 @@
 #include <strsafe.h>
 #include <dxcapi.h>
 
+#ifdef USE_IMGUI
+#include "externals/imgui/imgui.h"
+#include "externals/imgui/imgui_impl_dx12.h"
+#include "externals/imgui/imgui_impl_win32.h"
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#endif
+
+
 #pragma comment(lib, "dxcompiler.lib")
 #pragma comment(lib, "Dbghelp.lib")
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
-
 
 struct Vector4 {
     float x, y, z, w;
@@ -27,7 +35,7 @@ struct Vector3 {
 };
 
 struct Matrix4x4 {
-    float m[4][4];
+    float matrix[4][4];
 };
 
 struct Transform {
@@ -39,10 +47,10 @@ struct Transform {
 // 単位行列
 Matrix4x4 MakeIdentity4x4() {
     Matrix4x4 result{};
-    result.m[0][0] = 1.0f;
-    result.m[1][1] = 1.0f;
-    result.m[2][2] = 1.0f;
-    result.m[3][3] = 1.0f;
+    result.matrix[0][0] = 1.0f;
+    result.matrix[1][1] = 1.0f;
+    result.matrix[2][2] = 1.0f;
+    result.matrix[3][3] = 1.0f;
     return result;
 }
 
@@ -52,7 +60,7 @@ Matrix4x4 Multiply(const Matrix4x4& m1, const Matrix4x4& m2) {
     for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 4; ++j) {
             for (int k = 0; k < 4; ++k) {
-                result.m[i][j] += m1.m[i][k] * m2.m[k][j];
+                result.matrix[i][j] += m1.matrix[i][k] * m2.matrix[k][j];
             }
         }
     }
@@ -63,37 +71,37 @@ Matrix4x4 Multiply(const Matrix4x4& m1, const Matrix4x4& m2) {
 Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Vector3& translate) {
     // スケール
     Matrix4x4 scaleMatrix{};
-    scaleMatrix.m[0][0] = scale.x;
-    scaleMatrix.m[1][1] = scale.y;
-    scaleMatrix.m[2][2] = scale.z;
-    scaleMatrix.m[3][3] = 1.0f;
+    scaleMatrix.matrix[0][0] = scale.x;
+    scaleMatrix.matrix[1][1] = scale.y;
+    scaleMatrix.matrix[2][2] = scale.z;
+    scaleMatrix.matrix[3][3] = 1.0f;
 
     // 回転X
     Matrix4x4 rotX{};
-    rotX.m[0][0] = 1.0f;
-    rotX.m[1][1] = cosf(rotate.x);  rotX.m[1][2] = sinf(rotate.x);
-    rotX.m[2][1] = -sinf(rotate.x); rotX.m[2][2] = cosf(rotate.x);
-    rotX.m[3][3] = 1.0f;
+    rotX.matrix[0][0] = 1.0f;
+    rotX.matrix[1][1] = cosf(rotate.x);  rotX.matrix[1][2] = sinf(rotate.x);
+    rotX.matrix[2][1] = -sinf(rotate.x); rotX.matrix[2][2] = cosf(rotate.x);
+    rotX.matrix[3][3] = 1.0f;
 
     // 回転Y
     Matrix4x4 rotY{};
-    rotY.m[0][0] = cosf(rotate.y);  rotY.m[0][2] = -sinf(rotate.y);
-    rotY.m[1][1] = 1.0f;
-    rotY.m[2][0] = sinf(rotate.y);  rotY.m[2][2] = cosf(rotate.y);
-    rotY.m[3][3] = 1.0f;
+    rotY.matrix[0][0] = cosf(rotate.y);  rotY.matrix[0][2] = -sinf(rotate.y);
+    rotY.matrix[1][1] = 1.0f;
+    rotY.matrix[2][0] = sinf(rotate.y);  rotY.matrix[2][2] = cosf(rotate.y);
+    rotY.matrix[3][3] = 1.0f;
 
     // 回転Z
     Matrix4x4 rotZ{};
-    rotZ.m[0][0] = cosf(rotate.z);  rotZ.m[0][1] = sinf(rotate.z);
-    rotZ.m[1][0] = -sinf(rotate.z); rotZ.m[1][1] = cosf(rotate.z);
-    rotZ.m[2][2] = 1.0f;
-    rotZ.m[3][3] = 1.0f;
+    rotZ.matrix[0][0] = cosf(rotate.z);  rotZ.matrix[0][1] = sinf(rotate.z);
+    rotZ.matrix[1][0] = -sinf(rotate.z); rotZ.matrix[1][1] = cosf(rotate.z);
+    rotZ.matrix[2][2] = 1.0f;
+    rotZ.matrix[3][3] = 1.0f;
 
     // 平行移動
     Matrix4x4 translateMatrix = MakeIdentity4x4();
-    translateMatrix.m[3][0] = translate.x;
-    translateMatrix.m[3][1] = translate.y;
-    translateMatrix.m[3][2] = translate.z;
+    translateMatrix.matrix[3][0] = translate.x;
+    translateMatrix.matrix[3][1] = translate.y;
+    translateMatrix.matrix[3][2] = translate.z;
 
     return Multiply(scaleMatrix, Multiply(rotX, Multiply(rotY, Multiply(rotZ, translateMatrix))));
 }
@@ -102,31 +110,31 @@ Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Ve
 Matrix4x4 Inverse(const Matrix4x4& m) {
     Matrix4x4 result{};
     float det =
-        m.m[0][0] * (m.m[1][1] * (m.m[2][2] * m.m[3][3] - m.m[2][3] * m.m[3][2]) - m.m[1][2] * (m.m[2][1] * m.m[3][3] - m.m[2][3] * m.m[3][1]) + m.m[1][3] * (m.m[2][1] * m.m[3][2] - m.m[2][2] * m.m[3][1]))
-        - m.m[0][1] * (m.m[1][0] * (m.m[2][2] * m.m[3][3] - m.m[2][3] * m.m[3][2]) - m.m[1][2] * (m.m[2][0] * m.m[3][3] - m.m[2][3] * m.m[3][0]) + m.m[1][3] * (m.m[2][0] * m.m[3][2] - m.m[2][2] * m.m[3][0]))
-        + m.m[0][2] * (m.m[1][0] * (m.m[2][1] * m.m[3][3] - m.m[2][3] * m.m[3][1]) - m.m[1][1] * (m.m[2][0] * m.m[3][3] - m.m[2][3] * m.m[3][0]) + m.m[1][3] * (m.m[2][0] * m.m[3][1] - m.m[2][1] * m.m[3][0]))
-        - m.m[0][3] * (m.m[1][0] * (m.m[2][1] * m.m[3][2] - m.m[2][2] * m.m[3][1]) - m.m[1][1] * (m.m[2][0] * m.m[3][2] - m.m[2][2] * m.m[3][0]) + m.m[1][2] * (m.m[2][0] * m.m[3][1] - m.m[2][1] * m.m[3][0]));
+        m.matrix[0][0] * (m.matrix[1][1] * (m.matrix[2][2] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][2]) - m.matrix[1][2] * (m.matrix[2][1] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][1]) + m.matrix[1][3] * (m.matrix[2][1] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][1]))
+        - m.matrix[0][1] * (m.matrix[1][0] * (m.matrix[2][2] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][2]) - m.matrix[1][2] * (m.matrix[2][0] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][0]) + m.matrix[1][3] * (m.matrix[2][0] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][0]))
+        + m.matrix[0][2] * (m.matrix[1][0] * (m.matrix[2][1] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][1]) - m.matrix[1][1] * (m.matrix[2][0] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][0]) + m.matrix[1][3] * (m.matrix[2][0] * m.matrix[3][1] - m.matrix[2][1] * m.matrix[3][0]))
+        - m.matrix[0][3] * (m.matrix[1][0] * (m.matrix[2][1] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][1]) - m.matrix[1][1] * (m.matrix[2][0] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][0]) + m.matrix[1][2] * (m.matrix[2][0] * m.matrix[3][1] - m.matrix[2][1] * m.matrix[3][0]));
 
     float invDet = 1.0f / det;
-    result.m[0][0] = invDet * (m.m[1][1] * (m.m[2][2] * m.m[3][3] - m.m[2][3] * m.m[3][2]) - m.m[1][2] * (m.m[2][1] * m.m[3][3] - m.m[2][3] * m.m[3][1]) + m.m[1][3] * (m.m[2][1] * m.m[3][2] - m.m[2][2] * m.m[3][1]));
-    result.m[0][1] = -invDet * (m.m[0][1] * (m.m[2][2] * m.m[3][3] - m.m[2][3] * m.m[3][2]) - m.m[0][2] * (m.m[2][1] * m.m[3][3] - m.m[2][3] * m.m[3][1]) + m.m[0][3] * (m.m[2][1] * m.m[3][2] - m.m[2][2] * m.m[3][1]));
-    result.m[0][2] = invDet * (m.m[0][1] * (m.m[1][2] * m.m[3][3] - m.m[1][3] * m.m[3][2]) - m.m[0][2] * (m.m[1][1] * m.m[3][3] - m.m[1][3] * m.m[3][1]) + m.m[0][3] * (m.m[1][1] * m.m[3][2] - m.m[1][2] * m.m[3][1]));
-    result.m[0][3] = -invDet * (m.m[0][1] * (m.m[1][2] * m.m[2][3] - m.m[1][3] * m.m[2][2]) - m.m[0][2] * (m.m[1][1] * m.m[2][3] - m.m[1][3] * m.m[2][1]) + m.m[0][3] * (m.m[1][1] * m.m[2][2] - m.m[1][2] * m.m[2][1]));
+    result.matrix[0][0] = invDet * (m.matrix[1][1] * (m.matrix[2][2] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][2]) - m.matrix[1][2] * (m.matrix[2][1] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][1]) + m.matrix[1][3] * (m.matrix[2][1] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][1]));
+    result.matrix[0][1] = -invDet * (m.matrix[0][1] * (m.matrix[2][2] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][2]) - m.matrix[0][2] * (m.matrix[2][1] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][1]) + m.matrix[0][3] * (m.matrix[2][1] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][1]));
+    result.matrix[0][2] = invDet * (m.matrix[0][1] * (m.matrix[1][2] * m.matrix[3][3] - m.matrix[1][3] * m.matrix[3][2]) - m.matrix[0][2] * (m.matrix[1][1] * m.matrix[3][3] - m.matrix[1][3] * m.matrix[3][1]) + m.matrix[0][3] * (m.matrix[1][1] * m.matrix[3][2] - m.matrix[1][2] * m.matrix[3][1]));
+    result.matrix[0][3] = -invDet * (m.matrix[0][1] * (m.matrix[1][2] * m.matrix[2][3] - m.matrix[1][3] * m.matrix[2][2]) - m.matrix[0][2] * (m.matrix[1][1] * m.matrix[2][3] - m.matrix[1][3] * m.matrix[2][1]) + m.matrix[0][3] * (m.matrix[1][1] * m.matrix[2][2] - m.matrix[1][2] * m.matrix[2][1]));
 
-    result.m[1][0] = -invDet * (m.m[1][0] * (m.m[2][2] * m.m[3][3] - m.m[2][3] * m.m[3][2]) - m.m[1][2] * (m.m[2][0] * m.m[3][3] - m.m[2][3] * m.m[3][0]) + m.m[1][3] * (m.m[2][0] * m.m[3][2] - m.m[2][2] * m.m[3][0]));
-    result.m[1][1] = invDet * (m.m[0][0] * (m.m[2][2] * m.m[3][3] - m.m[2][3] * m.m[3][2]) - m.m[0][2] * (m.m[2][0] * m.m[3][3] - m.m[2][3] * m.m[3][0]) + m.m[0][3] * (m.m[2][0] * m.m[3][2] - m.m[2][2] * m.m[3][0]));
-    result.m[1][2] = -invDet * (m.m[0][0] * (m.m[1][2] * m.m[3][3] - m.m[1][3] * m.m[3][2]) - m.m[0][2] * (m.m[1][0] * m.m[3][3] - m.m[1][3] * m.m[3][0]) + m.m[0][3] * (m.m[1][0] * m.m[3][2] - m.m[1][2] * m.m[3][0]));
-    result.m[1][3] = invDet * (m.m[0][0] * (m.m[1][2] * m.m[2][3] - m.m[1][3] * m.m[2][2]) - m.m[0][2] * (m.m[1][0] * m.m[2][3] - m.m[1][3] * m.m[2][0]) + m.m[0][3] * (m.m[1][0] * m.m[2][2] - m.m[1][2] * m.m[2][0]));
+    result.matrix[1][0] = -invDet * (m.matrix[1][0] * (m.matrix[2][2] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][2]) - m.matrix[1][2] * (m.matrix[2][0] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][0]) + m.matrix[1][3] * (m.matrix[2][0] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][0]));
+    result.matrix[1][1] = invDet * (m.matrix[0][0] * (m.matrix[2][2] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][2]) - m.matrix[0][2] * (m.matrix[2][0] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][0]) + m.matrix[0][3] * (m.matrix[2][0] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][0]));
+    result.matrix[1][2] = -invDet * (m.matrix[0][0] * (m.matrix[1][2] * m.matrix[3][3] - m.matrix[1][3] * m.matrix[3][2]) - m.matrix[0][2] * (m.matrix[1][0] * m.matrix[3][3] - m.matrix[1][3] * m.matrix[3][0]) + m.matrix[0][3] * (m.matrix[1][0] * m.matrix[3][2] - m.matrix[1][2] * m.matrix[3][0]));
+    result.matrix[1][3] = invDet * (m.matrix[0][0] * (m.matrix[1][2] * m.matrix[2][3] - m.matrix[1][3] * m.matrix[2][2]) - m.matrix[0][2] * (m.matrix[1][0] * m.matrix[2][3] - m.matrix[1][3] * m.matrix[2][0]) + m.matrix[0][3] * (m.matrix[1][0] * m.matrix[2][2] - m.matrix[1][2] * m.matrix[2][0]));
 
-    result.m[2][0] = invDet * (m.m[1][0] * (m.m[2][1] * m.m[3][3] - m.m[2][3] * m.m[3][1]) - m.m[1][1] * (m.m[2][0] * m.m[3][3] - m.m[2][3] * m.m[3][0]) + m.m[1][3] * (m.m[2][0] * m.m[3][1] - m.m[2][1] * m.m[3][0]));
-    result.m[2][1] = -invDet * (m.m[0][0] * (m.m[2][1] * m.m[3][3] - m.m[2][3] * m.m[3][1]) - m.m[0][1] * (m.m[2][0] * m.m[3][3] - m.m[2][3] * m.m[3][0]) + m.m[0][3] * (m.m[2][0] * m.m[3][1] - m.m[2][1] * m.m[3][0]));
-    result.m[2][2] = invDet * (m.m[0][0] * (m.m[1][1] * m.m[3][3] - m.m[1][3] * m.m[3][1]) - m.m[0][1] * (m.m[1][0] * m.m[3][3] - m.m[1][3] * m.m[3][0]) + m.m[0][3] * (m.m[1][0] * m.m[3][1] - m.m[1][1] * m.m[3][0]));
-    result.m[2][3] = -invDet * (m.m[0][0] * (m.m[1][1] * m.m[2][3] - m.m[1][3] * m.m[2][1]) - m.m[0][1] * (m.m[1][0] * m.m[2][3] - m.m[1][3] * m.m[2][0]) + m.m[0][3] * (m.m[1][0] * m.m[2][1] - m.m[1][1] * m.m[2][0]));
+    result.matrix[2][0] = invDet * (m.matrix[1][0] * (m.matrix[2][1] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][1]) - m.matrix[1][1] * (m.matrix[2][0] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][0]) + m.matrix[1][3] * (m.matrix[2][0] * m.matrix[3][1] - m.matrix[2][1] * m.matrix[3][0]));
+    result.matrix[2][1] = -invDet * (m.matrix[0][0] * (m.matrix[2][1] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][1]) - m.matrix[0][1] * (m.matrix[2][0] * m.matrix[3][3] - m.matrix[2][3] * m.matrix[3][0]) + m.matrix[0][3] * (m.matrix[2][0] * m.matrix[3][1] - m.matrix[2][1] * m.matrix[3][0]));
+    result.matrix[2][2] = invDet * (m.matrix[0][0] * (m.matrix[1][1] * m.matrix[3][3] - m.matrix[1][3] * m.matrix[3][1]) - m.matrix[0][1] * (m.matrix[1][0] * m.matrix[3][3] - m.matrix[1][3] * m.matrix[3][0]) + m.matrix[0][3] * (m.matrix[1][0] * m.matrix[3][1] - m.matrix[1][1] * m.matrix[3][0]));
+    result.matrix[2][3] = -invDet * (m.matrix[0][0] * (m.matrix[1][1] * m.matrix[2][3] - m.matrix[1][3] * m.matrix[2][1]) - m.matrix[0][1] * (m.matrix[1][0] * m.matrix[2][3] - m.matrix[1][3] * m.matrix[2][0]) + m.matrix[0][3] * (m.matrix[1][0] * m.matrix[2][1] - m.matrix[1][1] * m.matrix[2][0]));
 
-    result.m[3][0] = -invDet * (m.m[1][0] * (m.m[2][1] * m.m[3][2] - m.m[2][2] * m.m[3][1]) - m.m[1][1] * (m.m[2][0] * m.m[3][2] - m.m[2][2] * m.m[3][0]) + m.m[1][2] * (m.m[2][0] * m.m[3][1] - m.m[2][1] * m.m[3][0]));
-    result.m[3][1] = invDet * (m.m[0][0] * (m.m[2][1] * m.m[3][2] - m.m[2][2] * m.m[3][1]) - m.m[0][1] * (m.m[2][0] * m.m[3][2] - m.m[2][2] * m.m[3][0]) + m.m[0][2] * (m.m[2][0] * m.m[3][1] - m.m[2][1] * m.m[3][0]));
-    result.m[3][2] = -invDet * (m.m[0][0] * (m.m[1][1] * m.m[3][2] - m.m[1][2] * m.m[3][1]) - m.m[0][1] * (m.m[1][0] * m.m[3][2] - m.m[1][2] * m.m[3][0]) + m.m[0][2] * (m.m[1][0] * m.m[3][1] - m.m[1][1] * m.m[3][0]));
-    result.m[3][3] = invDet * (m.m[0][0] * (m.m[1][1] * m.m[2][2] - m.m[1][2] * m.m[2][1]) - m.m[0][1] * (m.m[1][0] * m.m[2][2] - m.m[1][2] * m.m[2][0]) + m.m[0][2] * (m.m[1][0] * m.m[2][1] - m.m[1][1] * m.m[2][0]));
+    result.matrix[3][0] = -invDet * (m.matrix[1][0] * (m.matrix[2][1] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][1]) - m.matrix[1][1] * (m.matrix[2][0] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][0]) + m.matrix[1][2] * (m.matrix[2][0] * m.matrix[3][1] - m.matrix[2][1] * m.matrix[3][0]));
+    result.matrix[3][1] = invDet * (m.matrix[0][0] * (m.matrix[2][1] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][1]) - m.matrix[0][1] * (m.matrix[2][0] * m.matrix[3][2] - m.matrix[2][2] * m.matrix[3][0]) + m.matrix[0][2] * (m.matrix[2][0] * m.matrix[3][1] - m.matrix[2][1] * m.matrix[3][0]));
+    result.matrix[3][2] = -invDet * (m.matrix[0][0] * (m.matrix[1][1] * m.matrix[3][2] - m.matrix[1][2] * m.matrix[3][1]) - m.matrix[0][1] * (m.matrix[1][0] * m.matrix[3][2] - m.matrix[1][2] * m.matrix[3][0]) + m.matrix[0][2] * (m.matrix[1][0] * m.matrix[3][1] - m.matrix[1][1] * m.matrix[3][0]));
+    result.matrix[3][3] = invDet * (m.matrix[0][0] * (m.matrix[1][1] * m.matrix[2][2] - m.matrix[1][2] * m.matrix[2][1]) - m.matrix[0][1] * (m.matrix[1][0] * m.matrix[2][2] - m.matrix[1][2] * m.matrix[2][0]) + m.matrix[0][2] * (m.matrix[1][0] * m.matrix[2][1] - m.matrix[1][1] * m.matrix[2][0]));
 
     return result;
 }
@@ -135,11 +143,11 @@ Matrix4x4 Inverse(const Matrix4x4& m) {
 Matrix4x4 MakePerspectiveFovMatrix(float fovY, float aspectRatio, float nearClip, float farClip) {
     Matrix4x4 result{};
     float f = 1.0f / tanf(fovY / 2.0f);
-    result.m[0][0] = f / aspectRatio;
-    result.m[1][1] = f;
-    result.m[2][2] = farClip / (farClip - nearClip);
-    result.m[2][3] = 1.0f;
-    result.m[3][2] = -nearClip * farClip / (farClip - nearClip);
+    result.matrix[0][0] = f / aspectRatio;
+    result.matrix[1][1] = f;
+    result.matrix[2][2] = farClip / (farClip - nearClip);
+    result.matrix[2][3] = 1.0f;
+    result.matrix[3][2] = -nearClip * farClip / (farClip - nearClip);
     return result;
 }
 
@@ -191,6 +199,11 @@ void Log(const std::wstring& message) {
 }
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+#ifdef USE_IMGUI
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam)) {
+        return true;
+    }
+#endif
     if (msg == WM_DESTROY) {
         PostQuitMessage(0);
         return 0;
@@ -223,6 +236,18 @@ ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes) {
     );
     assert(SUCCEEDED(hr));
     return resource;
+}
+
+ID3D12DescriptorHeap* CreateDescriptorHeap(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE heapType, UINT numDescriptors, bool shaderVisible) {
+    D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc{};
+    descriptorHeapDesc.Type = heapType;
+    descriptorHeapDesc.NumDescriptors = numDescriptors;
+    descriptorHeapDesc.Flags = shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+
+    ID3D12DescriptorHeap* descriptorHeap = nullptr;
+    HRESULT hr = device->CreateDescriptorHeap(&descriptorHeapDesc, IID_PPV_ARGS(&descriptorHeap));
+    assert(SUCCEEDED(hr));
+    return descriptorHeap;
 }
 
 // CompileShader関数
@@ -404,12 +429,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     hr = swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainResources[1]));
     assert(SUCCEEDED(hr));
 
-    ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
-    D3D12_DESCRIPTOR_HEAP_DESC rtvDescriptorHeapDesc{};
-    rtvDescriptorHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    rtvDescriptorHeapDesc.NumDescriptors = 2;
-    hr = device->CreateDescriptorHeap(&rtvDescriptorHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap));
-    assert(SUCCEEDED(hr));
+    // RTV用のヒープでディスクリプタの数は2。RTVはShader内で触るものではないので、ShaderVisibleはfalse
+    ID3D12DescriptorHeap* rtvDescriptorHeap = CreateDescriptorHeap(device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 2, false);
+
+    // SRV用のヒープでディスクリプタの数は128。SRVはShader内で触るものなので、ShaderVisibleはtrue
+    ID3D12DescriptorHeap* srvDescriptorHeap = CreateDescriptorHeap(device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 128, true);
 
     D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
     rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
@@ -439,9 +463,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     HANDLE fenceEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     assert(fenceEvent != nullptr);
 
-
     //DXCの初期化
-
     IDxcUtils* dxcUtils = nullptr;
     IDxcCompiler3* dxcCompiler = nullptr;
     hr = DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxcUtils));
@@ -453,22 +475,37 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     hr = dxcUtils->CreateDefaultIncludeHandler(&includeHandler);
     assert(SUCCEEDED(hr));
 
+#ifdef USE_IMGUI
+    // ImGuiの初期化。詳細はさして重要ではないので解説は省略する。
+    // こういうもんである
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX12_Init(device,
+        swapChainDesc.BufferCount,
+        rtvDesc.Format,
+        srvDescriptorHeap,
+        srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+        srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Build();
+#endif
 
     //RootSignatureの生成
-
     D3D12_ROOT_SIGNATURE_DESC descriptionRootSignature{};
     descriptionRootSignature.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     // RootParameter作成。複数設定できるので配列。今回は結果1つだけなので長さ1の配列
     D3D12_ROOT_PARAMETER rootParameters[2] = {};
-    rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // CBVを使う
-    rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;   // PixelShaderで使う
-    rootParameters[0].Descriptor.ShaderRegister = 0;                      // レジスタ番号0とバインド
-    rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // CBVを使う
-    rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;  // VertexShaderで使う
-    rootParameters[1].Descriptor.ShaderRegister = 0;                      // レジスタ番号0を使う
-    descriptionRootSignature.pParameters = rootParameters;                 // ルートパラメータ配列へのポインタ
-    descriptionRootSignature.NumParameters = _countof(rootParameters);     // 配列の長さ
+    rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    rootParameters[0].Descriptor.ShaderRegister = 0;
+    rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    rootParameters[1].Descriptor.ShaderRegister = 0;
+    descriptionRootSignature.pParameters = rootParameters;
+    descriptionRootSignature.NumParameters = _countof(rootParameters);
 
     ID3DBlob* signatureBlob = nullptr;
     ID3DBlob* errorBlob = nullptr;
@@ -482,9 +519,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     hr = device->CreateRootSignature(0, signatureBlob->GetBufferPointer(), signatureBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature));
     assert(SUCCEEDED(hr));
 
-
     // InputLayoutの設定
-
     D3D12_INPUT_ELEMENT_DESC inputElementDescs[1] = {};
     inputElementDescs[0].SemanticName = "POSITION";
     inputElementDescs[0].SemanticIndex = 0;
@@ -495,28 +530,21 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     inputLayoutDesc.pInputElementDescs = inputElementDescs;
     inputLayoutDesc.NumElements = _countof(inputElementDescs);
 
-
     //BlendStateの設定
-
     D3D12_BLEND_DESC blendDesc{};
     blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
-
     //RasterizerStateの設定
-
     D3D12_RASTERIZER_DESC rasterizerDesc{};
     rasterizerDesc.CullMode = D3D12_CULL_MODE_BACK;
     rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
 
-
     //ShaderをCompileする
-
     IDxcBlob* vertexShaderBlob = CompileShader(L"Object3d.VS.hlsl", L"vs_6_0", dxcUtils, dxcCompiler, includeHandler);
     assert(vertexShaderBlob != nullptr);
 
     IDxcBlob* pixelShaderBlob = CompileShader(L"Object3d.PS.hlsl", L"ps_6_0", dxcUtils, dxcCompiler, includeHandler);
     assert(pixelShaderBlob != nullptr);
-
 
     //PSOを生成する
     D3D12_GRAPHICS_PIPELINE_STATE_DESC graphicsPipelineStateDesc{};
@@ -526,15 +554,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     graphicsPipelineStateDesc.PS = { pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize() };
     graphicsPipelineStateDesc.BlendState = blendDesc;
     graphicsPipelineStateDesc.RasterizerState = rasterizerDesc;
-
-
     graphicsPipelineStateDesc.NumRenderTargets = 1;
     graphicsPipelineStateDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-
-
     graphicsPipelineStateDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-
-
     graphicsPipelineStateDesc.SampleDesc.Count = 1;
     graphicsPipelineStateDesc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
 
@@ -542,9 +564,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     hr = device->CreateGraphicsPipelineState(&graphicsPipelineStateDesc, IID_PPV_ARGS(&graphicsPipelineState));
     assert(SUCCEEDED(hr));
 
-
     //VertexResourceを生成する
-
     ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(Vector4) * 3);
 
     // マテリアル用のリソースを作る。今回はcolor1つ分のサイズを用意する
@@ -553,17 +573,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     // WVP用のリソースを作る。Matrix4x4 1つ分のサイズを用意する
     ID3D12Resource* wvpResource = CreateBufferResource(device, sizeof(Matrix4x4));
 
-
     //VertexBufferViewを作成する
-
     D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
     vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
-    vertexBufferView.SizeInBytes = sizeof(Vector4) * 3; // 使用するリソースのサイズは頂点3つ分のサイズ
-    vertexBufferView.StrideInBytes = sizeof(Vector4);   // 1頂点あたりのサイズ
-
+    vertexBufferView.SizeInBytes = sizeof(Vector4) * 3;
+    vertexBufferView.StrideInBytes = sizeof(Vector4);
 
     //Resourceにデータを書き込む
-
     Vector4* vertexData = nullptr;
     vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
     // 左下
@@ -578,7 +594,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     // 書き込むためのアドレスを取得
     materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
     // 今回は赤を書き込んでみる
-    *materialData = Vector4(1.0f, 0.0f, 0.0f, 1.0f);
+    *materialData = { 1.0f, 0.0f, 0.0f, 1.0f };
 
     // データを書き込む
     Matrix4x4* wvpData = nullptr;
@@ -587,9 +603,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     // 単位行列を書きこんでおく
     *wvpData = MakeIdentity4x4();
 
-
     //ViewportとScissorの設定
-
     D3D12_VIEWPORT viewport{};
     viewport.Width = static_cast<float>(windowWidth);
     viewport.Height = static_cast<float>(windowHeight);
@@ -610,7 +624,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
     // カメラのTransform
     Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -5.0f} };
 
-
     // メインループ
     MSG msg{};
     while (msg.message != WM_QUIT) {
@@ -619,6 +632,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
             DispatchMessage(&msg);
         }
         else {
+#ifdef USE_IMGUI
+            ImGui_ImplDX12_NewFrame();
+            ImGui_ImplWin32_NewFrame();
+            ImGui::NewFrame();
+#endif
+
             UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
 
             D3D12_RESOURCE_BARRIER barrier{};
@@ -635,6 +654,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
             commandList->ClearRenderTargetView(rtvHandles[backBufferIndex], clearColor, 0, nullptr);
 
             // ゲームの処理
+#ifdef USE_IMGUI
+            // 開発用UIの処理。実際に開発用のUIを出す場合はここをゲーム固有の処理に置き換える
+            ImGui::ShowDemoWindow();
+#endif
             transform.rotate.y += 0.03f;
             Matrix4x4 worldMatrix = MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
             Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
@@ -643,11 +666,20 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
             Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
             *wvpData = worldViewProjectionMatrix;
 
+#ifdef USE_IMGUI
+            // ImGuiの内部コマンドを生成する
+            ImGui::Render();
+#endif
 
             //描画コマンド
-
             commandList->RSSetViewports(1, &viewport);
             commandList->RSSetScissorRects(1, &scissorRect);
+
+#ifdef USE_IMGUI
+            // 描画用のDescriptorHeapの設定
+            ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap };
+            commandList->SetDescriptorHeaps(1, descriptorHeaps);
+#endif
 
             commandList->SetGraphicsRootSignature(rootSignature);
             commandList->SetPipelineState(graphicsPipelineState);
@@ -664,6 +696,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
             // 描画
             commandList->DrawInstanced(3, 1, 0, 0);
 
+#ifdef USE_IMGUI
+            // 実際のcommandListのImGuiの描画コマンドを積む
+            ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+#endif
 
             barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
             barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
@@ -691,9 +727,15 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
         }
     }
 
+#ifdef USE_IMGUI
+    // ImGuiの終了処理。詳細はさして重要ではないので解説は省略する。
+    // こういうもんである。初期化と逆順に行う
+    ImGui_ImplDX12_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+#endif
 
     // 解放処理
-
     wvpResource->Release();
     materialResource->Release();
     vertexResource->Release();
@@ -713,6 +755,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPSTR, _In
 
     CloseHandle(fenceEvent);
     fence->Release();
+    srvDescriptorHeap->Release();
     rtvDescriptorHeap->Release();
     swapChainResources[0]->Release();
     swapChainResources[1]->Release();
