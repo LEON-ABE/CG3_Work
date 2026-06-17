@@ -5,14 +5,25 @@ struct Material
 
 ConstantBuffer<Material> gMaterial : register(b0);
 
-struct PixelShaderOutput
+
+Texture2D<float4> gTexture : register(t0);
+
+
+SamplerState gSampler : register(s0);
+
+struct VertexShaderOutput
 {
-    float4 color : SV_TARGET0;
+    float4 position : SV_POSITION;
+    float2 texcoord : TEXCOORD0;
 };
 
-PixelShaderOutput main()
+float4 main(VertexShaderOutput input) : SV_TARGET
 {
-    PixelShaderOutput output;
-    output.color = gMaterial.color;
-    return output;
+    
+    float4 textureColor = gTexture.Sample(gSampler, input.texcoord);
+    
+    
+    float4 finalColor = gMaterial.color * textureColor;
+    
+    return finalColor;
 }
