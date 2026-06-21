@@ -3,12 +3,12 @@ struct TransformationMatrix
     float4x4 WVP;
 };
 
-ConstantBuffer<TransformationMatrix> gTransformationMatrix : register(b0);
+ConstantBuffer<TransformationMatrix> gTransformationMatrix : register(b1);
 
 struct VertexShaderInput
 {
     float4 position : POSITION;
-    float2 texcoord : TEXCOORD0; 
+    float2 texcoord : TEXCOORD0;
 };
 
 struct VertexShaderOutput
