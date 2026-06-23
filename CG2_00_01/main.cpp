@@ -105,7 +105,7 @@ std::string ConvertString(const std::wstring& wstr) {
         return "";
     }
     std::string strTo(size_needed, 0);
-    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), &strTo[0], size_needed, NULL, NULL);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int)wstr.size(), NULL, 0, NULL, NULL);
     return strTo;
 }
 
@@ -512,7 +512,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     device->CreateRenderTargetView(swapChainResources[1], &rtvDesc, rtvHandles[1]);
 
     ID3D12Resource* depthStencilResource = CreateDepthStencilTextureResource(device, kClientWidth, kClientHeight);
-   
+
     ID3D12DescriptorHeap* dsvDescriptorHeap = CreateDescriptorHeap(device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1, false);
 
     // DSVの設定
@@ -556,7 +556,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     rootParameters[1].Descriptor.ShaderRegister = 0;
 
     // Parameter[2]: DescriptorTable SRV 
-    D3D12_ROOT_DESCRIPTOR_RANGE descriptorRange[1] = {};
+    D3D12_DESCRIPTOR_RANGE descriptorRange[1] = {}; // 修正: D3D12_ROOT_DESCRIPTOR_RANGEからD3D12_DESCRIPTOR_RANGEへ修正
     descriptorRange[0].BaseShaderRegister = 0;
     descriptorRange[0].NumDescriptors = 1;
     descriptorRange[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -632,7 +632,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     // 書き込みします
     depthStencilDesc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
     // 比較関数はLessEqual
-    depthStencilDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL; // 修正: ComparisonFunc から DepthFunc へ修正
 
     // PSOにDepthStencilStateとDSVの書き込み用フォーマットを指定
     pipelineStateDesc.DepthStencilState = depthStencilDesc;
@@ -678,6 +678,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     vertexData[5].position = { 0.5f, -0.5f, 0.5f, 1.0f };
     vertexData[5].texcoord = { 1.0f, 1.0f };
 
+    // --- 資料に基づき、スプライト用の頂点リソースとビューを追加 ---
+    ID3D12Resource* vertexResourceSprite = CreateBufferResource(device, sizeof(VertexData) * 6);
+    D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSprite{};
+    vertexBufferViewSprite.BufferLocation = vertexResourceSprite->GetGPUVirtualAddress();
+    vertexBufferViewSprite.SizeInBytes = sizeof(VertexData) * 6;
+    vertexBufferViewSprite.StrideInBytes = sizeof(VertexData);
+
+    VertexData* vertexDataSprite = nullptr;
+    vertexResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataSprite));
+
+    // 1枚目の三角形
+    vertexDataSprite[0].position = { 0.0f, 360.0f, 0.0f, 1.0f }; // 左下
+    vertexDataSprite[0].texcoord = { 0.0f, 1.0f };
+    vertexDataSprite[1].position = { 0.0f, 0.0f, 0.0f, 1.0f }; // 左上
+    vertexDataSprite[1].texcoord = { 0.0f, 0.0f };
+    vertexDataSprite[2].position = { 640.0f, 360.0f, 0.0f, 1.0f }; // 右下
+    vertexDataSprite[2].texcoord = { 1.0f, 1.0f };
+    // 2枚目の三角形
+    vertexDataSprite[3].position = { 0.0f, 0.0f, 0.0f, 1.0f }; // 左上
+    vertexDataSprite[3].texcoord = { 0.0f, 0.0f };
+    vertexDataSprite[4].position = { 640.0f, 0.0f, 0.0f, 1.0f }; // 右上
+    vertexDataSprite[4].texcoord = { 1.0f, 0.0f };
+    vertexDataSprite[5].position = { 640.0f, 360.0f, 0.0f, 1.0f }; // 右下
+    vertexDataSprite[5].texcoord = { 1.0f, 1.0f };
+
     ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Material));
     Material* materialData = nullptr;
     materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
@@ -688,6 +713,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     TransformationMatrix* wvpData = nullptr;
     wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
     wvpData->WVP = MakeIdentity4x4();
+
+    // --- 資料に基づき、スプライト用のTransformationMatrixのResourceを追加 ---
+    ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(TransformationMatrix));
+    TransformationMatrix* transformationMatrixDataSprite = nullptr;
+    transformationMatrixResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&transformationMatrixDataSprite));
+    transformationMatrixDataSprite->WVP = MakeIdentity4x4();
 
     // テクスチャの読み込みと転送の組み合わせ
     DirectX::ScratchImage mipImages = LoadTexture("resources/uvChecker.png");
@@ -728,6 +759,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
     Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -5.0f} };
+
+    // --- 資料に基づき、CPUで動かす用のTransformを追加 ---
+    Transform transformSprite{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
 
 #ifdef USE_IMGUI
     IMGUI_CHECKVERSION();
@@ -779,6 +813,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             Matrix4x4 wvpMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
             wvpData->WVP = wvpMatrix;
 
+            // --- 資料に基づき、スプライト用のWVPMatrixを作って書き込む ---
+            Matrix4x4 worldMatrixSprite = MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
+            Matrix4x4 viewMatrixSprite = MakeIdentity4x4();
+            Matrix4x4 projectionMatrixSprite = MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
+            Matrix4x4 wvpMatrixSprite = Multiply(worldMatrixSprite, Multiply(viewMatrixSprite, projectionMatrixSprite));
+            transformationMatrixDataSprite->WVP = wvpMatrixSprite;
+
             UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
 
             D3D12_RESOURCE_BARRIER barrier{};
@@ -818,7 +859,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
             commandList->DrawInstanced(6, 1, 0, 0);
 
+            // --- 資料に基づき、スプライト用の描画コマンドを積む ---
+            commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite); // VBV設定
+            // TransformationMatrixBufferの場所を設定
+            commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
+            commandList->DrawInstanced(6, 1, 0, 0);
+
 #ifdef USE_IMGUI
+            // ImGuiはスプライトの後に描画される
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
 #endif
 
@@ -858,6 +906,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     dsvDescriptorHeap->Release();
 
     // 解放処理
+    // --- 追加したスプライト用のリソースの解放 ---
+    transformationMatrixResourceSprite->Release();
+    vertexResourceSprite->Release();
+
     textureResource->Release();
     wvpResource->Release();
     materialResource->Release();
