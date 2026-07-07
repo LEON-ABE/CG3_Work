@@ -130,10 +130,12 @@ ID3D12Resource* CreateTextureResource(ID3D12Device* device, const DirectX::TexMe
 }
 
 void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mipImages, ID3D12Device* device, ID3D12GraphicsCommandList* commandList) {
-    // 中間リソースを用いたデータ転送処理
+    (void)texture; (void)mipImages; (void)device; (void)commandList;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
+int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow) {
+    (void)hPrevInstance; (void)lpCmdLine;
+
     // 1. ウィンドウの生成
     WNDCLASS wc{};
     wc.lpfnWndProc = WindowProc;
@@ -141,23 +143,37 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     wc.hInstance = hInstance;
     RegisterClass(&wc);
     HWND hWnd = CreateWindowEx(0, wc.lpszClassName, L"CG2", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 1280, 720, nullptr, nullptr, hInstance, nullptr);
+    assert(hWnd != nullptr);
     ShowWindow(hWnd, nCmdShow);
 
     // 2. DirectX12の初期化
-    ID3GIFactory7* dxgiFactory = nullptr;
-    CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
+    HRESULT hr = S_OK;
+    IDXGIFactory7* dxgiFactory = nullptr;
+    hr = CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
+    assert(SUCCEEDED(hr) && dxgiFactory != nullptr);
+
     IDXGIAdapter4* useAdapter = nullptr;
-    dxgiFactory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&useAdapter));
+    hr = dxgiFactory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&useAdapter));
+    assert(SUCCEEDED(hr) && useAdapter != nullptr);
+
     ID3D12Device* device = nullptr;
-    D3D12CreateDevice(useAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device));
+    hr = D3D12CreateDevice(useAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device));
+    assert(SUCCEEDED(hr) && device != nullptr);
 
     ID3D12CommandQueue* commandQueue = nullptr;
     D3D12_COMMAND_QUEUE_DESC queueDesc{};
-    device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue));
+    hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue));
+    assert(SUCCEEDED(hr) && commandQueue != nullptr);
+
     ID3D12CommandAllocator* commandAllocator = nullptr;
-    device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
+    hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
+    assert(SUCCEEDED(hr) && commandAllocator != nullptr);
+
     ID3D12GraphicsCommandList* commandList = nullptr;
-    device->CreateGraphicsCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
+   
+    assert(commandAllocator != nullptr);
+    hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
+    assert(SUCCEEDED(hr) && commandList != nullptr);
 
     IDXGISwapChain4* swapChain = nullptr;
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
@@ -169,32 +185,42 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     swapChainDesc.BufferCount = 2;
     swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     IDXGISwapChain1* swapChain1 = nullptr;
-    dxgiFactory->CreateSwapChainForHwnd(commandQueue, hWnd, &swapChainDesc, nullptr, nullptr, &swapChain1);
-    swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
+
+    // commandQueue
+    assert(commandQueue != nullptr);
+    hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue, hWnd, &swapChainDesc, nullptr, nullptr, &swapChain1);
+    assert(SUCCEEDED(hr) && swapChain1 != nullptr);
+    hr = swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
+    assert(SUCCEEDED(hr) && swapChain != nullptr);
     swapChain1->Release();
 
     ID3D12Resource* swapChainResources[2] = {};
-    swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainResources[0]));
-    swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainResources[1]));
+    hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainResources[0]));
+    assert(SUCCEEDED(hr) && swapChainResources[0] != nullptr);
+    hr = swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainResources[1]));
+    assert(SUCCEEDED(hr) && swapChainResources[1] != nullptr);
 
     ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.NumDescriptors = 2;
-    device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap));
+    hr = device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap));
+    assert(SUCCEEDED(hr) && rtvDescriptorHeap != nullptr);
 
     ID3D12DescriptorHeap* srvDescriptorHeap = nullptr;
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvHeapDesc.NumDescriptors = 128;
     srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&srvDescriptorHeap));
+    hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&srvDescriptorHeap));
+    assert(SUCCEEDED(hr) && srvDescriptorHeap != nullptr);
 
     ID3D12DescriptorHeap* dsvDescriptorHeap = nullptr;
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc{};
     dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
     dsvHeapDesc.NumDescriptors = 1;
-    device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsvDescriptorHeap));
+    hr = device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsvDescriptorHeap));
+    assert(SUCCEEDED(hr) && dsvDescriptorHeap != nullptr);
 
     ID3D12Resource* depthStencilResource = nullptr;
     D3D12_RESOURCE_DESC depthStencilDesc{};
@@ -211,7 +237,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     D3D12_CLEAR_VALUE depthClearValue{};
     depthClearValue.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
     depthClearValue.DepthStencil.Depth = 1.0f;
-    device->CreateCommittedResource(&depthHeapProp, D3D12_HEAP_FLAG_NONE, &depthStencilDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthClearValue, IID_PPV_ARGS(&depthStencilResource));
+    hr = device->CreateCommittedResource(&depthHeapProp, D3D12_HEAP_FLAG_NONE, &depthStencilDesc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthClearValue, IID_PPV_ARGS(&depthStencilResource));
+    assert(SUCCEEDED(hr) && depthStencilResource != nullptr);
 
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
     dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
@@ -219,15 +246,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     device->CreateDepthStencilView(depthStencilResource, &dsvDesc, dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
     ID3D12Fence* fence = nullptr;
-    device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+    hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+    assert(SUCCEEDED(hr) && fence != nullptr);
+
     HANDLE fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    assert(fenceEvent != nullptr); 
 
     IDxcUtils* dxcUtils = nullptr;
     IDxcCompiler3* dxcCompiler = nullptr;
     IDxcIncludeHandler* includeHandler = nullptr;
     DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxcUtils));
     DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxcCompiler));
+    assert(dxcUtils != nullptr && dxcCompiler != nullptr);
     dxcUtils->CreateDefaultIncludeHandler(&includeHandler);
+    assert(includeHandler != nullptr);
 
     ID3DBlob* vertexShaderBlob = nullptr;
     ID3DBlob* pixelShaderBlob = nullptr;
@@ -243,7 +275,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     UINT descriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    // 1枚目のテクスチャ読み込みとSRV生成
+
     DirectX::ScratchImage mipImages = LoadTexture(L"resources/uvChecker.png");
     const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
     ID3D12Resource* textureResource = CreateTextureResource(device, metadata);
@@ -259,20 +291,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     srvHandleCPU.ptr += descriptorSizeSRV * 1;
     device->CreateShaderResourceView(textureResource, &srvDesc, srvHandleCPU);
 
-    DirectX::ScratchImage mipImages2 = LoadTexture(L"resources/monsterBall.png"); 
-    const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata(); 
-    ID3D12Resource* textureResource2 = CreateTextureResource(device, metadata2);
-    UploadTextureData(textureResource2, mipImages2, device, commandList); 
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc2{}; 
+    DirectX::ScratchImage mipImages2 = LoadTexture(L"resources/monsterBall.png");
+    const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
+    ID3D12Resource* textureResource2 = CreateTextureResource(device, metadata2);
+    UploadTextureData(textureResource2, mipImages2, device, commandList);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc2{};
     srvDesc2.Format = metadata2.format;
     srvDesc2.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc2.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc2.Texture2D.MipLevels = static_cast<UINT>(metadata2.mipLevels);
 
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandleCPU2 = srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-    srvHandleCPU2.ptr += descriptorSizeSRV * 2; // インデックス2の位置に設定
-    device->CreateShaderResourceView(textureResource2, &srvDesc2, srvHandleCPU2); // SRVを作成
+    srvHandleCPU2.ptr += descriptorSizeSRV * 2;
+    device->CreateShaderResourceView(textureResource2, &srvDesc2, srvHandleCPU2);
 
 
     // GPUハンドルの取得
@@ -280,7 +313,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     textureSrvHandleGPU.ptr += descriptorSizeSRV * 1;
 
     D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPU2 = srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-    textureSrvHandleGPU2.ptr += descriptorSizeSRV * 2; 
+    textureSrvHandleGPU2.ptr += descriptorSizeSRV * 2;
 
 
 #ifdef USE_IMGUI
@@ -291,8 +324,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     ImGui_ImplDX12_Init(device, 2, DXGI_FORMAT_R8G8B8A8_UNORM, srvDescriptorHeap, srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 #endif
 
-    bool useMonsterBall = false; 
-
+    bool useMonsterBall = false;
 
     MSG msg{};
     while (msg.message != WM_QUIT) {
@@ -307,31 +339,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             ImGui::NewFrame();
 
             ImGui::Begin("Window");
-            ImGui::Checkbox("useMonsterBall", &useMonsterBall); 
+            ImGui::Checkbox("useMonsterBall", &useMonsterBall);
             ImGui::End();
-     
 
             ImGui::Render();
 #endif
 
+            assert(commandAllocator != nullptr);
             commandAllocator->Reset();
+
+            assert(commandList != nullptr);
             commandList->Reset(commandAllocator, nullptr);
 
-     
             ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap };
             commandList->SetDescriptorHeaps(1, descriptorHeaps);
-            commandList->SetGraphicsRootSignature(rootSignature);
-            commandList->SetPipelineState(graphicsPipelineState);
 
-            
+            if (rootSignature != nullptr) {
+                commandList->SetGraphicsRootSignature(rootSignature);
+            }
+
+            if (graphicsPipelineState != nullptr) {
+                commandList->SetPipelineState(graphicsPipelineState);
+            }
+
             if (useMonsterBall) {
-                commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2); 
+                commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2);
             }
             else {
-                commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU); 
+                commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
             }
-            
-            commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
 
 #ifdef USE_IMGUI
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
@@ -339,6 +375,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
             commandList->Close();
             ID3D12CommandList* cmdLists[] = { commandList };
+
+            assert(commandQueue != nullptr);
             commandQueue->ExecuteCommandLists(1, cmdLists);
             swapChain->Present(1, 0);
 
@@ -346,6 +384,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             commandQueue->Signal(fence, fenceValue);
             if (fence->GetCompletedValue() < fenceValue) {
                 fence->SetEventOnCompletion(fenceValue, fenceEvent);
+                // fenceEventが有効であることをコンパイラに確定させて呼び出し
+                assert(fenceEvent != nullptr);
                 WaitForSingleObject(fenceEvent, INFINITE);
             }
         }
@@ -357,44 +397,43 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     ImGui::DestroyContext();
 #endif
 
-    depthStencilResource->Release();
-    dsvDescriptorHeap->Release();
+    // 各種リソース解放（非ヌル確認を行って安全に解放）
+    if (depthStencilResource) depthStencilResource->Release();
+    if (dsvDescriptorHeap) dsvDescriptorHeap->Release();
+    if (transformationMatrixResourceSprite) transformationMatrixResourceSprite->Release();
+    if (textureResource2) textureResource2->Release();
+    if (textureResource) textureResource->Release();
+    if (wvpResource) wvpResource->Release();
+    if (materialResource) materialResource->Release();
+    if (vertexResource) vertexResource->Release();
 
-    transformationMatrixResourceSprite->Release();
- 
-   textureResource2->Release();
+    if (graphicsPipelineState) graphicsPipelineState->Release();
+    if (signatureBlob) signatureBlob->Release();
+    if (errorBlob) errorBlob->Release();
+    if (rootSignature) rootSignature->Release();
+    if (pixelShaderBlob) pixelShaderBlob->Release();
+    if (vertexShaderBlob) vertexShaderBlob->Release();
 
-    textureResource->Release();
-    wvpResource->Release();
-    materialResource->Release();
-    vertexResource->Release();
-    graphicsPipelineState->Release();
-    signatureBlob->Release();
-    if (errorBlob) {
-        errorBlob->Release();
+    if (includeHandler) includeHandler->Release();
+    if (dxcCompiler) dxcCompiler->Release();
+    if (dxcUtils) dxcUtils->Release();
+
+    if (fenceEvent != nullptr) {
+        CloseHandle(fenceEvent);
     }
-    rootSignature->Release();
-    pixelShaderBlob->Release();
-    vertexShaderBlob->Release();
+    if (fence) fence->Release();
+    if (srvDescriptorHeap) srvDescriptorHeap->Release();
+    if (rtvDescriptorHeap) rtvDescriptorHeap->Release();
+    if (swapChainResources[0]) swapChainResources[0]->Release();
+    if (swapChainResources[1]) swapChainResources[1]->Release();
+    if (swapChain) swapChain->Release();
+    if (commandList) commandList->Release();
+    if (commandAllocator) commandAllocator->Release();
+    if (commandQueue) commandQueue->Release();
 
-    includeHandler->Release();
-    dxcCompiler->Release();
-    dxcUtils->Release();
-
-    CloseHandle(fenceEvent);
-    fence->Release();
-    srvDescriptorHeap->Release();
-    rtvDescriptorHeap->Release();
-    swapChainResources[0]->Release();
-    swapChainResources[1]->Release();
-    swapChain->Release();
-    commandList->Release();
-    commandAllocator->Release();
-    commandQueue->Release();
-
-    useAdapter->Release();
-    device->Release();
-    dxgiFactory->Release();
+    if (useAdapter) useAdapter->Release();
+    if (device) device->Release();
+    if (dxgiFactory) dxgiFactory->Release();
 
     return 0;
 }
