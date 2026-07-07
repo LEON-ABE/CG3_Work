@@ -42,10 +42,13 @@ struct Vector2 {
 struct VertexData {
     Vector4 position;
     Vector2 texcoord;
+    Vector3 normal; 
 };
 
 struct Material {
     Vector4 color;
+    int32_t enableLighting; 
+    float padding[3];       
 };
 
 struct Matrix4x4 {
@@ -54,6 +57,13 @@ struct Matrix4x4 {
 
 struct TransformationMatrix {
     Matrix4x4 WVP;
+    Matrix4x4 World; 
+};
+
+struct DirectionalLight {
+    Vector4 color;
+    Vector3 direction;
+    float intensity;
 };
 
 struct Transform {
@@ -170,7 +180,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     assert(SUCCEEDED(hr) && commandAllocator != nullptr);
 
     ID3D12GraphicsCommandList* commandList = nullptr;
-   
+
     assert(commandAllocator != nullptr);
     hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
     assert(SUCCEEDED(hr) && commandList != nullptr);
@@ -250,7 +260,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     assert(SUCCEEDED(hr) && fence != nullptr);
 
     HANDLE fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    assert(fenceEvent != nullptr); 
+    assert(fenceEvent != nullptr);
 
     IDxcUtils* dxcUtils = nullptr;
     IDxcCompiler3* dxcCompiler = nullptr;
@@ -272,6 +282,20 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Material));
     ID3D12Resource* wvpResource = CreateBufferResource(device, sizeof(TransformationMatrix));
     ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(TransformationMatrix));
+    ID3D12Resource* directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight)); 
+
+    DirectionalLight* directionalLightData = nullptr;
+    directionalLightResource->Map(0, nullptr, reinterpret_cast<void**>(&directionalLightData));
+    directionalLightData->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
+    directionalLightData->direction = Vector3{ 0.0f, -1.0f, 0.0f };
+    directionalLightData->intensity = 1.0f;
+    directionalLightResource->Unmap(0, nullptr);
+ 
+    Material* materialData = nullptr;
+    materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
+    materialData->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
+    materialData->enableLighting = 1; 
+    materialResource->Unmap(0, nullptr);
 
     UINT descriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
@@ -362,6 +386,14 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 commandList->SetPipelineState(graphicsPipelineState);
             }
 
+            Material* matMap = nullptr;
+            if (SUCCEEDED(materialResource->Map(0, nullptr, reinterpret_cast<void**>(&matMap)))) {
+                matMap->enableLighting = useMonsterBall ? 1 : 0; 
+                materialResource->Unmap(0, nullptr);
+            }
+
+            commandList->SetGraphicsRootConstantBufferView(1, directionalLightResource->GetGPUVirtualAddress());
+
             if (useMonsterBall) {
                 commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2);
             }
@@ -383,8 +415,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             UINT64 fenceValue = 1;
             commandQueue->Signal(fence, fenceValue);
             if (fence->GetCompletedValue() < fenceValue) {
-                fence->SetEventOnCompletion(fenceValue, fenceEvent);
-                // fenceEventが有効であることをコンパイラに確定させて呼び出し
+                fence->SetEventOnCompletion(fenceValue, fenceEvent);     
                 assert(fenceEvent != nullptr);
                 WaitForSingleObject(fenceEvent, INFINITE);
             }
@@ -397,7 +428,8 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     ImGui::DestroyContext();
 #endif
 
-    // 各種リソース解放（非ヌル確認を行って安全に解放）
+    //解放
+    if (directionalLightResource) directionalLightResource->Release(); 
     if (depthStencilResource) depthStencilResource->Release();
     if (dsvDescriptorHeap) dsvDescriptorHeap->Release();
     if (transformationMatrixResourceSprite) transformationMatrixResourceSprite->Release();
