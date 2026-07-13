@@ -14,3 +14,6 @@ spelling_exclusion_path = ./exclusion.dic
 
 *.dmp
 Dumps/
+
+[externals/**]
+generated_code = true

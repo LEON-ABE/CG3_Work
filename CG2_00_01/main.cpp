@@ -253,7 +253,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     hr = device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvDescriptorHeap));
     assert(SUCCEEDED(hr) && rtvDescriptorHeap != nullptr);
 
-    // 【修正箇所】第2引数のタイポを修正 (&srvDescriptorHeap に変更)
     ID3D12DescriptorHeap* srvDescriptorHeap = nullptr;
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -306,7 +305,6 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxcCompiler));
     dxcUtils->CreateDefaultIncludeHandler(&includeHandler);
 
-    // 【追加箇所】不足していたシェーダーのコンパイルおよびパイプライン生成処理
     IDxcBlob* vertexShaderBlob = CompileShader(L"Object3d.VS.hlsl", L"vs_6_0", dxcUtils, dxcCompiler, includeHandler);
     IDxcBlob* pixelShaderBlob = CompileShader(L"Object3d.PS.hlsl", L"ps_6_0", dxcUtils, dxcCompiler, includeHandler);
 
@@ -319,11 +317,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     D3D12_ROOT_PARAMETER rootParameters[3]{};
     rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    rootParameters[0].Descriptor.ShaderRegister = 0; // b0: Material
+    rootParameters[0].Descriptor.ShaderRegister = 0; 
     rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    rootParameters[1].Descriptor.ShaderRegister = 1; // b1: DirectionalLight / TransformationMatrix
+    rootParameters[1].Descriptor.ShaderRegister = 1; 
     rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
     rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -405,6 +403,37 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(TransformationMatrix));
     ID3D12Resource* directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
 
+    ID3D12Resource* indexResourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
+
+    D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
+    indexBufferViewSprite.BufferLocation = indexResourceSprite->GetGPUVirtualAddress();
+    indexBufferViewSprite.SizeInBytes = sizeof(uint32_t) * 6;
+    indexBufferViewSprite.Format = DXGI_FORMAT_R32_UINT;
+
+    uint32_t* indexDataSprite = nullptr;
+    indexResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&indexDataSprite));
+    indexDataSprite[0] = 0; indexDataSprite[1] = 1; indexDataSprite[2] = 2;
+    indexDataSprite[3] = 1; indexDataSprite[4] = 3; indexDataSprite[5] = 2;
+    indexResourceSprite->Unmap(0, nullptr);
+
+    VertexData* vertexData = nullptr;
+    vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
+    // 左下
+    vertexData[0].position = { -0.5f, -0.5f, 0.0f, 1.0f }; vertexData[0].texcoord = { 0.0f, 1.0f }; vertexData[0].normal = { 0.0f, 0.0f, -1.0f };
+    // 左上
+    vertexData[1].position = { -0.5f,  0.5f, 0.0f, 1.0f }; vertexData[1].texcoord = { 0.0f, 0.0f }; vertexData[1].normal = { 0.0f, 0.0f, -1.0f };
+    // 右下
+    vertexData[2].position = { 0.5f, -0.5f, 0.0f, 1.0f }; vertexData[2].texcoord = { 1.0f, 1.0f }; vertexData[2].normal = { 0.0f, 0.0f, -1.0f };
+    // 右上
+    vertexData[3].position = { 0.5f,  0.5f, 0.0f, 1.0f }; vertexData[3].texcoord = { 1.0f, 0.0f }; vertexData[3].normal = { 0.0f, 0.0f, -1.0f };
+    vertexResource->Unmap(0, nullptr);
+
+    // 頂点バッファビューの設定
+    D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
+    vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
+    vertexBufferView.SizeInBytes = sizeof(VertexData) * 4;
+    vertexBufferView.StrideInBytes = sizeof(VertexData);
+
     DirectionalLight* directionalLightData = nullptr;
     directionalLightResource->Map(0, nullptr, reinterpret_cast<void**>(&directionalLightData));
     directionalLightData->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -417,6 +446,17 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     materialData->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
     materialData->enableLighting = 1;
     materialResource->Unmap(0, nullptr);
+
+    // WVP行列の初期化設定
+    TransformationMatrix* wvpData = nullptr;
+    wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            wvpData->WVP.m[i][j] = (i == j) ? 1.0f : 0.0f;
+            wvpData->World.m[i][j] = (i == j) ? 1.0f : 0.0f;
+        }
+    }
+    wvpResource->Unmap(0, nullptr);
 
     UINT descriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
@@ -495,6 +535,24 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             commandList->SetGraphicsRootSignature(rootSignature);
             commandList->SetPipelineState(graphicsPipelineState);
 
+            // ビューポートとシザー矩形の設定
+            D3D12_VIEWPORT viewport{ 0.0f, 0.0f, 1280.0f, 720.0f, 0.0f, 1.0f };
+            D3D12_RECT scissorRect{ 0, 0, 1280, 720 };
+            commandList->RSSetViewports(1, &viewport);
+            commandList->RSSetScissorRects(1, &scissorRect);
+
+            // レンダーターゲットビューの設定
+            UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
+            D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+            rtvHandle.ptr += backBufferIndex * device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+            D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+            commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+
+            // 画面クリア
+            float clearColor[] = { 0.1f, 0.25f, 0.5f, 1.0f };
+            commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+            commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
             Material* matMap = nullptr;
             if (SUCCEEDED(materialResource->Map(0, nullptr, reinterpret_cast<void**>(&matMap)))) {
                 matMap->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -503,7 +561,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             }
 
             commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
-            commandList->SetGraphicsRootConstantBufferView(1, directionalLightResource->GetGPUVirtualAddress());
+            commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress()); 
 
             if (useMonsterBall) {
                 commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU2);
@@ -511,6 +569,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             else {
                 commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
             }
+
+            // プリミティブトポロジーの設定
+            commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
+
+            commandList->IASetIndexBuffer(&indexBufferViewSprite);
+            commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 #ifdef USE_IMGUI
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
@@ -532,6 +597,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     }
 
     // 解放処理
+    if (indexResourceSprite) indexResourceSprite->Release();
     if (directionalLightResource) directionalLightResource->Release();
     if (depthStencilResource) depthStencilResource->Release();
     if (dsvDescriptorHeap) dsvDescriptorHeap->Release();
