@@ -2,6 +2,8 @@ struct Material
 {
     float4 color;
     int enableLighting;
+    float3 padding; 
+    float4x4 uvTransform; 
 };
 
 struct DirectionalLight
@@ -26,15 +28,16 @@ struct VertexShaderOutput
 
 float4 main(VertexShaderOutput input) : SV_TARGET
 {
-    float4 textureColor = gTexture.Sample(gSampler, input.texcoord);
+    float4 transformedUV = mul(float4(input.texcoord, 0.0f, 1.0f), gMaterial.uvTransform);
+    
+    //サンプリング
+    float4 textureColor = gTexture.Sample(gSampler, transformedUV.xy);
     float4 finalColor = gMaterial.color * textureColor;
-
+    
     if (gMaterial.enableLighting != 0)
     {
-       
         float NdotL = dot(normalize(input.normal), -gDirectionalLight.direction);
         float cos = pow(NdotL * 0.5f + 0.5f, 2.0f);
- 
         finalColor = gMaterial.color * gDirectionalLight.color * cos * gDirectionalLight.intensity * textureColor;
     }
     
