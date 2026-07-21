@@ -226,7 +226,7 @@ DirectX::ScratchImage LoadTexture(const std::wstring& filePath) {
 }
 
 // リソース作成ヘルパー関数
-ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes) {
+Microsoft::WRL::ComPtr<ID3D12Resource> CreateBufferResource(const Microsoft::WRL::ComPtr<ID3D12Device>& device, size_t sizeInBytes) {
     D3D12_HEAP_PROPERTIES uploadHeapProperties{};
     uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
 
@@ -239,13 +239,13 @@ ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes) {
     resourceDesc.SampleDesc.Count = 1;
     resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-    ID3D12Resource* resource = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource = nullptr;
     HRESULT hr = device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resource));
     assert(SUCCEEDED(hr));
     return resource;
 }
 
-ID3D12Resource* CreateTextureResource(ID3D12Device* device, const DirectX::TexMetadata& metadata) {
+Microsoft::WRL::ComPtr<ID3D12Resource> CreateTextureResource(const Microsoft::WRL::ComPtr<ID3D12Device>& device, const DirectX::TexMetadata& metadata) {
     D3D12_RESOURCE_DESC resourceDesc{};
     resourceDesc.Width = static_cast<UINT64>(metadata.width);
     resourceDesc.Height = static_cast<UINT>(metadata.height);
@@ -258,14 +258,14 @@ ID3D12Resource* CreateTextureResource(ID3D12Device* device, const DirectX::TexMe
     D3D12_HEAP_PROPERTIES heapProperties{};
     heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
 
-    ID3D12Resource* resource = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource = nullptr;
     HRESULT hr = device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &resourceDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&resource));
     assert(SUCCEEDED(hr));
     return resource;
 }
 
 // テクスチャデータのアップロード
-void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mipImages, ID3D12Device* device, ID3D12GraphicsCommandList* commandList) {
+void UploadTextureData(const Microsoft::WRL::ComPtr<ID3D12Resource>& texture, const DirectX::ScratchImage& mipImages, const Microsoft::WRL::ComPtr<ID3D12Device>& device, const Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>& commandList) {
     const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
     UINT numSubresources = static_cast<UINT>(metadata.mipLevels * metadata.arraySize);
 
@@ -289,7 +289,7 @@ void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mip
     uploadBufferDesc.SampleDesc.Count = 1;
     uploadBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-    ID3D12Resource* uploadBuffer = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Resource> uploadBuffer = nullptr;
     HRESULT hr = device->CreateCommittedResource(&uploadHeapProps, D3D12_HEAP_FLAG_NONE, &uploadBufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&uploadBuffer));
     assert(SUCCEEDED(hr));
 
@@ -312,12 +312,12 @@ void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mip
 
     for (UINT i = 0; i < numSubresources; ++i) {
         D3D12_TEXTURE_COPY_LOCATION dstLocation{};
-        dstLocation.pResource = texture;
+        dstLocation.pResource = texture.Get();
         dstLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         dstLocation.SubresourceIndex = i;
 
         D3D12_TEXTURE_COPY_LOCATION srcLocation{};
-        srcLocation.pResource = uploadBuffer;
+        srcLocation.pResource = uploadBuffer.Get();
         srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
         srcLocation.PlacedFootprint = layouts[i];
 
@@ -326,7 +326,7 @@ void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mip
 
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrier.Transition.pResource = texture;
+    barrier.Transition.pResource = texture.Get();
     barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -334,36 +334,33 @@ void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mip
 
     commandList->Close();
 
-    ID3D12CommandQueue* commandQueue = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
     D3D12_COMMAND_QUEUE_DESC queueDesc{};
     hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue));
     assert(SUCCEEDED(hr));
 
-    ID3D12CommandList* cmdLists[] = { commandList };
+    ID3D12CommandList* cmdLists[] = { commandList.Get() };
     commandQueue->ExecuteCommandLists(1, cmdLists);
 
-    ID3D12Fence* syncFence = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Fence> syncFence = nullptr;
     hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&syncFence));
     assert(SUCCEEDED(hr));
 
     HANDLE syncEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     assert(syncEvent != nullptr);
 
-    commandQueue->Signal(syncFence, 1);
+    commandQueue->Signal(syncFence.Get(), 1);
     if (syncFence->GetCompletedValue() < 1) {
         syncFence->SetEventOnCompletion(1, syncEvent);
         WaitForSingleObject(syncEvent, INFINITE);
     }
 
     CloseHandle(syncEvent);
-    syncFence->Release();
-    commandQueue->Release();
-    uploadBuffer->Release();
 }
 
 // DXCコンパイルヘルパー関数
-IDxcBlob* CompileShader(const std::wstring& filePath, const wchar_t* profile, IDxcUtils* dxcUtils, IDxcCompiler3* dxcCompiler, IDxcIncludeHandler* includeHandler) {
-    IDxcBlobEncoding* shaderSource = nullptr;
+Microsoft::WRL::ComPtr<IDxcBlob> CompileShader(const std::wstring& filePath, const wchar_t* profile, const Microsoft::WRL::ComPtr<IDxcUtils>& dxcUtils, const Microsoft::WRL::ComPtr<IDxcCompiler3>& dxcCompiler, const Microsoft::WRL::ComPtr<IDxcIncludeHandler>& includeHandler) {
+    Microsoft::WRL::ComPtr<IDxcBlobEncoding> shaderSource = nullptr;
     HRESULT hr = dxcUtils->LoadFile(filePath.c_str(), nullptr, &shaderSource);
     assert(SUCCEEDED(hr));
 
@@ -380,24 +377,20 @@ IDxcBlob* CompileShader(const std::wstring& filePath, const wchar_t* profile, ID
         L"-Zpr"
     };
 
-    IDxcResult* shaderResult = nullptr;
-    hr = dxcCompiler->Compile(&shaderBuffer, arguments, _countof(arguments), includeHandler, IID_PPV_ARGS(&shaderResult));
+    Microsoft::WRL::ComPtr<IDxcResult> shaderResult = nullptr;
+    hr = dxcCompiler->Compile(&shaderBuffer, arguments, _countof(arguments), includeHandler.Get(), IID_PPV_ARGS(&shaderResult));
     assert(SUCCEEDED(hr));
 
-    IDxcBlobUtf8* shaderError = nullptr;
+    Microsoft::WRL::ComPtr<IDxcBlobUtf8> shaderError = nullptr;
     shaderResult->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&shaderError), nullptr);
     if (shaderError != nullptr && shaderError->GetStringLength() != 0) {
         OutputDebugStringA(shaderError->GetStringPointer());
         assert(false && "Shader Compilation Failed");
     }
 
-    IDxcBlob* shaderBlob = nullptr;
+    Microsoft::WRL::ComPtr<IDxcBlob> shaderBlob = nullptr;
     hr = shaderResult->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&shaderBlob), nullptr);
     assert(SUCCEEDED(hr));
-
-    shaderSource->Release();
-    shaderResult->Release();
-    if (shaderError) shaderError->Release();
 
     return shaderBlob;
 }
@@ -489,14 +482,27 @@ ModelData LoadObjFile(const std::string& directoryPath, const std::string& filen
     return modelData;
 }
 
+// リソースリークチェック用構造体
+struct D3DResourceLeakChecker {
+    ~D3DResourceLeakChecker() {
+        Microsoft::WRL::ComPtr<IDXGIDebug1> debug;
+        if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug)))) {
+            debug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
+            debug->ReportLiveObjects(DXGI_DEBUG_APP, DXGI_DEBUG_RLO_ALL);
+            debug->ReportLiveObjects(DXGI_DEBUG_D3D12, DXGI_DEBUG_RLO_ALL);
+        }
+    }
+};
+
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow) {
     (void)hPrevInstance; (void)lpCmdLine;
 
+    D3DResourceLeakChecker leakCheck;
+
 #ifdef _DEBUG
-    ID3D12Debug* debugController = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Debug> debugController = nullptr;
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
         debugController->EnableDebugLayer();
-        debugController->Release();
     }
 #endif
 
@@ -510,32 +516,32 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     ShowWindow(hWnd, nCmdShow);
 
     HRESULT hr = S_OK;
-    IDXGIFactory7* dxgiFactory = nullptr;
+    Microsoft::WRL::ComPtr<IDXGIFactory7> dxgiFactory = nullptr;
     hr = CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
     assert(SUCCEEDED(hr) && dxgiFactory != nullptr);
 
-    IDXGIAdapter4* useAdapter = nullptr;
+    Microsoft::WRL::ComPtr<IDXGIAdapter4> useAdapter = nullptr;
     hr = dxgiFactory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&useAdapter));
     assert(SUCCEEDED(hr) && useAdapter != nullptr);
 
-    ID3D12Device* device = nullptr;
-    hr = D3D12CreateDevice(useAdapter, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device));
+    Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
+    hr = D3D12CreateDevice(useAdapter.Get(), D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device));
     assert(SUCCEEDED(hr) && device != nullptr);
 
-    ID3D12CommandQueue* commandQueue = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
     D3D12_COMMAND_QUEUE_DESC queueDesc{};
     hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue));
     assert(SUCCEEDED(hr) && commandQueue != nullptr);
 
-    ID3D12CommandAllocator* commandAllocator = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator = nullptr;
     hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
     assert(SUCCEEDED(hr) && commandAllocator != nullptr);
 
-    ID3D12GraphicsCommandList* commandList = nullptr;
-    hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator, nullptr, IID_PPV_ARGS(&commandList));
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList = nullptr;
+    hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList));
     assert(SUCCEEDED(hr) && commandList != nullptr);
 
-    IDXGISwapChain4* swapChain = nullptr;
+    Microsoft::WRL::ComPtr<IDXGISwapChain4> swapChain = nullptr;
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc{};
     swapChainDesc.Width = 1280;
     swapChainDesc.Height = 720;
@@ -544,21 +550,17 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.BufferCount = 2;
     swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    IDXGISwapChain1* swapChain1 = nullptr;
 
-    hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue, hWnd, &swapChainDesc, nullptr, nullptr, &swapChain1);
-    assert(SUCCEEDED(hr) && swapChain1 != nullptr);
-    hr = swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain));
+    hr = dxgiFactory->CreateSwapChainForHwnd(commandQueue.Get(), hWnd, &swapChainDesc, nullptr, nullptr, reinterpret_cast<IDXGISwapChain1**>(swapChain.GetAddressOf()));
     assert(SUCCEEDED(hr) && swapChain != nullptr);
-    swapChain1->Release();
 
-    ID3D12Resource* swapChainResources[2] = {};
+    Microsoft::WRL::ComPtr<ID3D12Resource> swapChainResources[2] = {};
     hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainResources[0]));
     assert(SUCCEEDED(hr) && swapChainResources[0] != nullptr);
     hr = swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainResources[1]));
     assert(SUCCEEDED(hr) && swapChainResources[1] != nullptr);
 
-    ID3D12DescriptorHeap* rtvDescriptorHeap = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvDescriptorHeap = nullptr;
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     rtvHeapDesc.NumDescriptors = 2;
@@ -570,10 +572,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     for (UINT i = 0; i < 2; ++i) {
         D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHandleStart;
         rtvHandle.ptr += rtvDescriptorSize * i;
-        device->CreateRenderTargetView(swapChainResources[i], nullptr, rtvHandle);
+        device->CreateRenderTargetView(swapChainResources[i].Get(), nullptr, rtvHandle);
     }
 
-    ID3D12DescriptorHeap* srvDescriptorHeap = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap = nullptr;
     D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
     srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     srvHeapDesc.NumDescriptors = 128;
@@ -581,14 +583,14 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     hr = device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&srvDescriptorHeap));
     assert(SUCCEEDED(hr) && srvDescriptorHeap != nullptr);
 
-    ID3D12DescriptorHeap* dsvDescriptorHeap = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvDescriptorHeap = nullptr;
     D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc{};
     dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
     dsvHeapDesc.NumDescriptors = 1;
     hr = device->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&dsvDescriptorHeap));
     assert(SUCCEEDED(hr) && dsvDescriptorHeap != nullptr);
 
-    ID3D12Resource* depthStencilResource = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Resource> depthStencilResource = nullptr;
     D3D12_RESOURCE_DESC depthStencilDesc{};
     depthStencilDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     depthStencilDesc.Width = 1280;
@@ -609,24 +611,24 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
     dsvDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
     dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-    device->CreateDepthStencilView(depthStencilResource, &dsvDesc, dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    device->CreateDepthStencilView(depthStencilResource.Get(), &dsvDesc, dsvDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
-    ID3D12Fence* fence = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12Fence> fence = nullptr;
     hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
     assert(SUCCEEDED(hr) && fence != nullptr);
 
     HANDLE fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     assert(fenceEvent != nullptr);
 
-    IDxcUtils* dxcUtils = nullptr;
-    IDxcCompiler3* dxcCompiler = nullptr;
-    IDxcIncludeHandler* includeHandler = nullptr;
+    Microsoft::WRL::ComPtr<IDxcUtils> dxcUtils = nullptr;
+    Microsoft::WRL::ComPtr<IDxcCompiler3> dxcCompiler = nullptr;
+    Microsoft::WRL::ComPtr<IDxcIncludeHandler> includeHandler = nullptr;
     DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxcUtils));
     DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxcCompiler));
     dxcUtils->CreateDefaultIncludeHandler(&includeHandler);
 
-    IDxcBlob* vertexShaderBlob = CompileShader(L"Object3d.VS.hlsl", L"vs_6_0", dxcUtils, dxcCompiler, includeHandler);
-    IDxcBlob* pixelShaderBlob = CompileShader(L"Object3d.PS.hlsl", L"ps_6_0", dxcUtils, dxcCompiler, includeHandler);
+    Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlob = CompileShader(L"Object3d.VS.hlsl", L"vs_6_0", dxcUtils, dxcCompiler, includeHandler);
+    Microsoft::WRL::ComPtr<IDxcBlob> pixelShaderBlob = CompileShader(L"Object3d.PS.hlsl", L"ps_6_0", dxcUtils, dxcCompiler, includeHandler);
 
     D3D12_DESCRIPTOR_RANGE descriptorRanges[1]{};
     descriptorRanges[0].BaseShaderRegister = 0;
@@ -669,15 +671,15 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     rootSignatureDesc.NumStaticSamplers = _countof(staticSamplers);
     rootSignatureDesc.pStaticSamplers = staticSamplers;
 
-    ID3DBlob* signatureBlob = nullptr;
-    ID3DBlob* errorBlob = nullptr;
+    Microsoft::WRL::ComPtr<ID3DBlob> signatureBlob = nullptr;
+    Microsoft::WRL::ComPtr<ID3DBlob> errorBlob = nullptr;
     hr = D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signatureBlob, &errorBlob);
     if (FAILED(hr)) {
         if (errorBlob) OutputDebugStringA((char*)errorBlob->GetBufferPointer());
         assert(false);
     }
 
-    ID3D12RootSignature* rootSignature = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature = nullptr;
     hr = device->CreateRootSignature(0, signatureBlob->GetBufferPointer(), signatureBlob->GetBufferSize(), IID_PPV_ARGS(&rootSignature));
     assert(SUCCEEDED(hr));
 
@@ -698,7 +700,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     inputElementDescs[2].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
-    psoDesc.pRootSignature = rootSignature;
+    psoDesc.pRootSignature = rootSignature.Get();
     psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
     psoDesc.VS = { vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize() };
     psoDesc.PS = { pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize() };
@@ -715,20 +717,20 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
     psoDesc.SampleDesc.Count = 1;
 
-    ID3D12PipelineState* graphicsPipelineState = nullptr;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> graphicsPipelineState = nullptr;
     hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&graphicsPipelineState));
     assert(SUCCEEDED(hr));
 
 
     ModelData modelData = LoadObjFile("resources", "plane.obj");
 
-    ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * modelData.vertices.size());
-    ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Material));
-    ID3D12Resource* wvpResource = CreateBufferResource(device, sizeof(TransformationMatrix));
-    ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(TransformationMatrix));
-    ID3D12Resource* directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
+    Microsoft::WRL::ComPtr<ID3D12Resource> vertexResource = CreateBufferResource(device, sizeof(VertexData) * modelData.vertices.size());
+    Microsoft::WRL::ComPtr<ID3D12Resource> materialResource = CreateBufferResource(device, sizeof(Material));
+    Microsoft::WRL::ComPtr<ID3D12Resource> wvpResource = CreateBufferResource(device, sizeof(TransformationMatrix));
+    Microsoft::WRL::ComPtr<ID3D12Resource> transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(TransformationMatrix));
+    Microsoft::WRL::ComPtr<ID3D12Resource> directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
 
-    ID3D12Resource* indexResourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
+    Microsoft::WRL::ComPtr<ID3D12Resource> indexResourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
 
     D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
     indexBufferViewSprite.BufferLocation = indexResourceSprite->GetGPUVirtualAddress();
@@ -780,10 +782,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     DirectX::ScratchImage mipImages = LoadTexture(std::wstring(modelData.material.textureFilePath.begin(), modelData.material.textureFilePath.end()));
     const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
-    ID3D12Resource* textureResource = CreateTextureResource(device, metadata);
+    Microsoft::WRL::ComPtr<ID3D12Resource> textureResource = CreateTextureResource(device, metadata);
 
     commandAllocator->Reset();
-    commandList->Reset(commandAllocator, nullptr);
+    commandList->Reset(commandAllocator.Get(), nullptr);
     UploadTextureData(textureResource, mipImages, device, commandList);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
@@ -794,14 +796,14 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandleCPU = srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
     srvHandleCPU.ptr += descriptorSizeSRV * 1;
-    device->CreateShaderResourceView(textureResource, &srvDesc, srvHandleCPU);
+    device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvHandleCPU);
 
     DirectX::ScratchImage mipImages2 = LoadTexture(L"resources/monsterBall.png");
     const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
-    ID3D12Resource* textureResource2 = CreateTextureResource(device, metadata2);
+    Microsoft::WRL::ComPtr<ID3D12Resource> textureResource2 = CreateTextureResource(device, metadata2);
 
     commandAllocator->Reset();
-    commandList->Reset(commandAllocator, nullptr);
+    commandList->Reset(commandAllocator.Get(), nullptr);
     UploadTextureData(textureResource2, mipImages2, device, commandList);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc2{};
@@ -812,7 +814,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandleCPU2 = srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
     srvHandleCPU2.ptr += descriptorSizeSRV * 2;
-    device->CreateShaderResourceView(textureResource2, &srvDesc2, srvHandleCPU2);
+    device->CreateShaderResourceView(textureResource2.Get(), &srvDesc2, srvHandleCPU2);
 
     D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPU = srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
     textureSrvHandleGPU.ptr += descriptorSizeSRV * 1;
@@ -825,7 +827,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGui_ImplWin32_Init(hWnd);
-    ImGui_ImplDX12_Init(device, 2, DXGI_FORMAT_R8G8B8A8_UNORM, srvDescriptorHeap, srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    ImGui_ImplDX12_Init(device.Get(), 2, DXGI_FORMAT_R8G8B8A8_UNORM, srvDescriptorHeap.Get(), srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 #endif
 
     bool useMonsterBall = false;
@@ -868,7 +870,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 #endif
 
             commandAllocator->Reset();
-            commandList->Reset(commandAllocator, nullptr);
+            commandList->Reset(commandAllocator.Get(), nullptr);
 
             Matrix4x4 matScale = MakeScaleMatrix(uvTransformSprite.scale);
             Matrix4x4 matRotate = MakeRotateZMatrix(uvTransformSprite.rotate.z);
@@ -890,11 +892,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 wvpResource->Unmap(0, nullptr);
             }
 
-            ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap };
+            ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap.Get() };
             commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
-            commandList->SetGraphicsRootSignature(rootSignature);
-            commandList->SetPipelineState(graphicsPipelineState);
+            commandList->SetGraphicsRootSignature(rootSignature.Get());
+            commandList->SetPipelineState(graphicsPipelineState.Get());
 
             D3D12_VIEWPORT viewport{ 0.0f, 0.0f, 1280.0f, 720.0f, 0.0f, 1.0f };
             D3D12_RECT scissorRect{ 0, 0, 1280, 720 };
@@ -904,7 +906,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             UINT backBufferIndex = swapChain->GetCurrentBackBufferIndex();
             D3D12_RESOURCE_BARRIER barrierToRenderTarget{};
             barrierToRenderTarget.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barrierToRenderTarget.Transition.pResource = swapChainResources[backBufferIndex];
+            barrierToRenderTarget.Transition.pResource = swapChainResources[backBufferIndex].Get();
             barrierToRenderTarget.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
             barrierToRenderTarget.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
             barrierToRenderTarget.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -945,25 +947,25 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
 
 #ifdef USE_IMGUI
-            ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+            ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
 #endif
 
             D3D12_RESOURCE_BARRIER barrierToPresent{};
             barrierToPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barrierToPresent.Transition.pResource = swapChainResources[backBufferIndex];
+            barrierToPresent.Transition.pResource = swapChainResources[backBufferIndex].Get();
             barrierToPresent.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
             barrierToPresent.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
             barrierToPresent.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             commandList->ResourceBarrier(1, &barrierToPresent);
 
             commandList->Close();
-            ID3D12CommandList* cmdLists[] = { commandList };
+            ID3D12CommandList* cmdLists[] = { commandList.Get() };
 
             commandQueue->ExecuteCommandLists(1, cmdLists);
             swapChain->Present(1, 0);
 
             fenceValue++;
-            commandQueue->Signal(fence, fenceValue);
+            commandQueue->Signal(fence.Get(), fenceValue);
             if (fence->GetCompletedValue() < fenceValue) {
                 fence->SetEventOnCompletion(fenceValue, fenceEvent);
                 WaitForSingleObject(fenceEvent, INFINITE);
@@ -972,7 +974,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     }
 
     fenceValue++;
-    commandQueue->Signal(fence, fenceValue);
+    commandQueue->Signal(fence.Get(), fenceValue);
     if (fence->GetCompletedValue() < fenceValue) {
         fence->SetEventOnCompletion(fenceValue, fenceEvent);
         WaitForSingleObject(fenceEvent, INFINITE);
@@ -984,44 +986,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     ImGui::DestroyContext();
 #endif
 
-    if (indexResourceSprite) indexResourceSprite->Release();
-    if (directionalLightResource) directionalLightResource->Release();
-    if (depthStencilResource) depthStencilResource->Release();
-    if (dsvDescriptorHeap) dsvDescriptorHeap->Release();
-    if (transformationMatrixResourceSprite) transformationMatrixResourceSprite->Release();
-    if (textureResource2) textureResource2->Release();
-    if (textureResource) textureResource->Release();
-    if (wvpResource) wvpResource->Release();
-    if (materialResource) materialResource->Release();
-    if (vertexResource) vertexResource->Release();
-
-    if (graphicsPipelineState) graphicsPipelineState->Release();
-    if (signatureBlob) signatureBlob->Release();
-    if (errorBlob) errorBlob->Release();
-    if (rootSignature) rootSignature->Release();
-    if (pixelShaderBlob) pixelShaderBlob->Release();
-    if (vertexShaderBlob) vertexShaderBlob->Release();
-
-    if (includeHandler) includeHandler->Release();
-    if (dxcCompiler) dxcCompiler->Release();
-    if (dxcUtils) dxcUtils->Release();
-
-    if (fenceEvent != nullptr) {
-        CloseHandle(fenceEvent);
-    }
-    if (fence) fence->Release();
-    if (srvDescriptorHeap) srvDescriptorHeap->Release();
-    if (rtvDescriptorHeap) rtvDescriptorHeap->Release();
-    if (swapChainResources[0]) swapChainResources[0]->Release();
-    if (swapChainResources[1]) swapChainResources[1]->Release();
-    if (swapChain) swapChain->Release();
-    if (commandList) commandList->Release();
-    if (commandAllocator) commandAllocator->Release();
-    if (commandQueue) commandQueue->Release();
-
-    if (useAdapter) useAdapter->Release();
-    if (device) device->Release();
-    if (dxgiFactory) dxgiFactory->Release();
+    CloseHandle(fenceEvent);
 
     return 0;
 }
