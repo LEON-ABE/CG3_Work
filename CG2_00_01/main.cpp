@@ -3,6 +3,8 @@
 #include <string>
 #include <format>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl.h>
@@ -45,6 +47,15 @@ struct VertexData {
     Vector3 normal;
 };
 
+struct MaterialData {
+    std::string textureFilePath;
+};
+
+struct ModelData {
+    std::vector<VertexData> vertices;
+    MaterialData material;
+};
+
 struct Matrix4x4 {
     float m[4][4];
 };
@@ -53,7 +64,7 @@ struct Material {
     Vector4 color;
     int32_t enableLighting;
     float padding[3];
-    Matrix4x4 uvTransform; 
+    Matrix4x4 uvTransform;
 };
 
 struct TransformationMatrix {
@@ -321,6 +332,97 @@ IDxcBlob* CompileShader(const std::wstring& filePath, const wchar_t* profile, ID
     return shaderBlob;
 }
 
+// マテリアルテンプレートファイルの読み込み
+MaterialData LoadMaterialTemplateFile(const std::string& directoryPath, const std::string& filename) {
+    MaterialData materialData;
+    std::string line;
+    std::ifstream file(directoryPath + "/" + filename);
+    assert(file.is_open());
+
+    while (std::getline(file, line)) {
+        std::string identifier;
+        std::istringstream s(line);
+        s >> identifier;
+
+        if (identifier == "map_Kd") {
+            std::string textureFilename;
+            s >> textureFilename;
+            materialData.textureFilePath = directoryPath + "/" + textureFilename;
+        }
+    }
+
+    return materialData;
+}
+
+// objファイルの読み込み
+ModelData LoadObjFile(const std::string& directoryPath, const std::string& filename) {
+    ModelData modelData;
+    std::vector<Vector4> positions;
+    std::vector<Vector3> normals;
+    std::vector<Vector2> texcoords;
+    std::string line;
+
+    std::ifstream file(directoryPath + "/" + filename);
+    assert(file.is_open());
+
+    while (std::getline(file, line)) {
+        std::string identifier;
+        std::istringstream s(line);
+        s >> identifier;
+
+        if (identifier == "v") {
+            Vector4 position;
+            s >> position.x >> position.y >> position.z;
+            position.x *= -1.0f;
+            position.w = 1.0f;
+            positions.push_back(position);
+        }
+        else if (identifier == "vt") {
+            Vector2 texcoord;
+            s >> texcoord.x >> texcoord.y;
+            texcoord.y = 1.0f - texcoord.y;
+            texcoords.push_back(texcoord);
+        }
+        else if (identifier == "vn") {
+            Vector3 normal;
+            s >> normal.x >> normal.y >> normal.z;
+            normal.x *= -1.0f;
+            normals.push_back(normal);
+        }
+        else if (identifier == "f") {
+            VertexData triangle[3];
+            for (int32_t faceVertex = 0; faceVertex < 3; ++faceVertex) {
+                std::string vertexDefinition;
+                s >> vertexDefinition;
+
+                std::istringstream v(vertexDefinition);
+                uint32_t elementIndices[3];
+                for (int32_t element = 0; element < 3; ++element) {
+                    std::string index;
+                    std::getline(v, index, '/');
+                    elementIndices[element] = std::stoi(index);
+                }
+
+                Vector4 position = positions[elementIndices[0] - 1];
+                Vector2 texcoord = texcoords[elementIndices[1] - 1];
+                Vector3 normal = normals[elementIndices[2] - 1];
+                VertexData vertex = { position, texcoord, normal };
+                triangle[faceVertex] = vertex;
+            }
+            modelData.vertices.push_back(triangle[2]);
+            modelData.vertices.push_back(triangle[1]);
+            modelData.vertices.push_back(triangle[0]);
+        }
+        else if (identifier == "mtllib") {
+            std::string materialFilename;
+            s >> materialFilename;
+            modelData.material = LoadMaterialTemplateFile(directoryPath, materialFilename);
+        }
+    }
+
+    return modelData;
+}
+
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow) {
     (void)hPrevInstance; (void)lpCmdLine;
 
@@ -551,8 +653,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&graphicsPipelineState));
     assert(SUCCEEDED(hr));
 
-  
-    ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * 4);
+
+    ModelData modelData = LoadObjFile("resources", "plane.obj");
+
+    ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * modelData.vertices.size());
     ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Material));
     ID3D12Resource* wvpResource = CreateBufferResource(device, sizeof(TransformationMatrix));
     ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(TransformationMatrix));
@@ -573,15 +677,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     VertexData* vertexData = nullptr;
     vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
-    vertexData[0].position = { -0.5f, -0.5f, 0.0f, 1.0f }; vertexData[0].texcoord = { 0.0f, 1.0f }; vertexData[0].normal = { 0.0f, 0.0f, -1.0f };
-    vertexData[1].position = { -0.5f,  0.5f, 0.0f, 1.0f }; vertexData[1].texcoord = { 0.0f, 0.0f }; vertexData[1].normal = { 0.0f, 0.0f, -1.0f };
-    vertexData[2].position = { 0.5f, -0.5f, 0.0f, 1.0f }; vertexData[2].texcoord = { 1.0f, 1.0f }; vertexData[2].normal = { 0.0f, 0.0f, -1.0f };
-    vertexData[3].position = { 0.5f,  0.5f, 0.0f, 1.0f }; vertexData[3].texcoord = { 1.0f, 0.0f }; vertexData[3].normal = { 0.0f, 0.0f, -1.0f };
+    std::memcpy(vertexData, modelData.vertices.data(), sizeof(VertexData) * modelData.vertices.size());
     vertexResource->Unmap(0, nullptr);
 
     D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
     vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
-    vertexBufferView.SizeInBytes = sizeof(VertexData) * 4;
+    vertexBufferView.SizeInBytes = UINT(sizeof(VertexData) * modelData.vertices.size());
     vertexBufferView.StrideInBytes = sizeof(VertexData);
 
     DirectionalLight* directionalLightData = nullptr;
@@ -591,12 +692,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     directionalLightData->intensity = 1.0f;
     directionalLightResource->Unmap(0, nullptr);
 
-  
+
     Material* materialData = nullptr;
     materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
     materialData->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
     materialData->enableLighting = 1;
-    materialData->uvTransform = MakeIdentity4x4(); 
+    materialData->uvTransform = MakeIdentity4x4();
     materialResource->Unmap(0, nullptr);
 
     TransformationMatrix* wvpData = nullptr;
@@ -611,7 +712,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     UINT descriptorSizeSRV = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    DirectX::ScratchImage mipImages = LoadTexture(L"resources/uvChecker.png");
+    DirectX::ScratchImage mipImages = LoadTexture(std::wstring(modelData.material.textureFilePath.begin(), modelData.material.textureFilePath.end()));
     const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
     ID3D12Resource* textureResource = CreateTextureResource(device, metadata);
 
@@ -729,12 +830,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
             commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-         
+
             Material* matMap = nullptr;
             if (SUCCEEDED(materialResource->Map(0, nullptr, reinterpret_cast<void**>(&matMap)))) {
                 matMap->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
                 matMap->enableLighting = 1;
-                matMap->uvTransform = uvTransformMatrix; 
+                matMap->uvTransform = uvTransformMatrix;
                 materialResource->Unmap(0, nullptr);
             }
 
@@ -752,8 +853,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 
-            commandList->IASetIndexBuffer(&indexBufferViewSprite);
-            commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+            commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
 
 #ifdef USE_IMGUI
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
