@@ -107,6 +107,24 @@ Matrix4x4 MakeRotateZMatrix(float theta) {
     return result;
 }
 
+Matrix4x4 MakeRotateXMatrix(float theta) {
+    Matrix4x4 result = MakeIdentity4x4();
+    result.m[1][1] = std::cos(theta);
+    result.m[1][2] = std::sin(theta);
+    result.m[2][1] = -std::sin(theta);
+    result.m[2][2] = std::cos(theta);
+    return result;
+}
+
+Matrix4x4 MakeRotateYMatrix(float theta) {
+    Matrix4x4 result = MakeIdentity4x4();
+    result.m[0][0] = std::cos(theta);
+    result.m[0][2] = -std::sin(theta);
+    result.m[2][0] = std::sin(theta);
+    result.m[2][2] = std::cos(theta);
+    return result;
+}
+
 Matrix4x4 MakeTranslateMatrix(const Vector3& translate) {
     Matrix4x4 result = MakeIdentity4x4();
     result.m[3][0] = translate.x;
@@ -125,6 +143,58 @@ Matrix4x4 Multiply(const Matrix4x4& m1, const Matrix4x4& m2) {
                 m1.m[i][3] * m2.m[3][j];
         }
     }
+    return result;
+}
+
+Matrix4x4 MakeAffineMatrix(const Vector3& scale, const Vector3& rotate, const Vector3& translate) {
+    Matrix4x4 scaleMatrix = MakeScaleMatrix(scale);
+    Matrix4x4 rotateXMatrix = MakeRotateXMatrix(rotate.x);
+    Matrix4x4 rotateYMatrix = MakeRotateYMatrix(rotate.y);
+    Matrix4x4 rotateZMatrix = MakeRotateZMatrix(rotate.z);
+    Matrix4x4 rotateMatrix = Multiply(rotateXMatrix, Multiply(rotateYMatrix, rotateZMatrix));
+    Matrix4x4 translateMatrix = MakeTranslateMatrix(translate);
+    return Multiply(scaleMatrix, Multiply(rotateMatrix, translateMatrix));
+}
+
+Matrix4x4 Inverse(const Matrix4x4& matrix) {
+    Matrix4x4 result = MakeIdentity4x4();
+    float a[4][8];
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            a[i][j] = matrix.m[i][j];
+            a[i][j + 4] = (i == j) ? 1.0f : 0.0f;
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        float pivot = a[i][i];
+        for (int j = 0; j < 8; ++j) {
+            a[i][j] /= pivot;
+        }
+        for (int k = 0; k < 4; ++k) {
+            if (k != i) {
+                float factor = a[k][i];
+                for (int j = 0; j < 8; ++j) {
+                    a[k][j] -= factor * a[i][j];
+                }
+            }
+        }
+    }
+    for (int i = 0; i < 4; ++i) {
+        for (int j = 0; j < 4; ++j) {
+            result.m[i][j] = a[i][j + 4];
+        }
+    }
+    return result;
+}
+
+Matrix4x4 MakePerspectiveFovMatrix(float fovY, float aspectRatio, float nearClip, float farClip) {
+    Matrix4x4 result{};
+    float cot = 1.0f / std::tan(fovY / 2.0f);
+    result.m[0][0] = (1.0f / aspectRatio) * cot;
+    result.m[1][1] = cot;
+    result.m[2][2] = farClip / (farClip - nearClip);
+    result.m[2][3] = 1.0f;
+    result.m[3][2] = -nearClip * farClip / (farClip - nearClip);
     return result;
 }
 
@@ -390,7 +460,6 @@ ModelData LoadObjFile(const std::string& directoryPath, const std::string& filen
             normals.push_back(normal);
         }
         else if (identifier == "f") {
-            VertexData triangle[3];
             for (int32_t faceVertex = 0; faceVertex < 3; ++faceVertex) {
                 std::string vertexDefinition;
                 s >> vertexDefinition;
@@ -407,11 +476,8 @@ ModelData LoadObjFile(const std::string& directoryPath, const std::string& filen
                 Vector2 texcoord = texcoords[elementIndices[1] - 1];
                 Vector3 normal = normals[elementIndices[2] - 1];
                 VertexData vertex = { position, texcoord, normal };
-                triangle[faceVertex] = vertex;
+                modelData.vertices.push_back(vertex);
             }
-            modelData.vertices.push_back(triangle[2]);
-            modelData.vertices.push_back(triangle[1]);
-            modelData.vertices.push_back(triangle[0]);
         }
         else if (identifier == "mtllib") {
             std::string materialFilename;
@@ -767,6 +833,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     Transform uvTransformSprite{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
 
+    Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+    Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.2967f, 0.0f, 0.0f}, {0.0f, 4.0f, -10.0f} };
+
     MSG msg{};
     while (msg.message != WM_QUIT) {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -780,6 +849,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             ImGui::NewFrame();
 
             ImGui::Begin("Window");
+            ImGui::DragFloat3("CameraTranslate", &cameraTransform.translate.x, 0.01f);
+            ImGui::SliderAngle("CameraRotateX", &cameraTransform.rotate.x);
+            ImGui::SliderAngle("CameraRotateY", &cameraTransform.rotate.y);
+            ImGui::SliderAngle("CameraRotateZ", &cameraTransform.rotate.z);
+            ImGui::SliderAngle("SphereRotateX", &transform.rotate.x);
+            ImGui::SliderAngle("SphereRotateY", &transform.rotate.y);
+            ImGui::SliderAngle("SphereRotateZ", &transform.rotate.z);
             ImGui::Checkbox("useMonsterBall", &useMonsterBall);
 
             ImGui::DragFloat2("UVTranslate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
@@ -800,6 +876,19 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
             Matrix4x4 uvTransformMatrix = Multiply(matScale, matRotate);
             uvTransformMatrix = Multiply(uvTransformMatrix, matTranslate);
+
+            Matrix4x4 worldMatrix = MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
+            Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
+            Matrix4x4 viewMatrix = Inverse(cameraMatrix);
+            Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(1280) / float(720), 0.1f, 100.0f);
+            Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
+
+            TransformationMatrix* wvpDataFrame = nullptr;
+            if (SUCCEEDED(wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpDataFrame)))) {
+                wvpDataFrame->WVP = worldViewProjectionMatrix;
+                wvpDataFrame->World = worldMatrix;
+                wvpResource->Unmap(0, nullptr);
+            }
 
             ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap };
             commandList->SetDescriptorHeaps(1, descriptorHeaps);
