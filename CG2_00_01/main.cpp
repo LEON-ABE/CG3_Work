@@ -1,3 +1,4 @@
+
 #include <Windows.h>
 #include <cstdint>
 #include <string>
@@ -13,6 +14,7 @@
 #include <dbghelp.h>
 #include <strsafe.h>
 #include <dxcapi.h>
+#include <xaudio2.h>
 #include "./externals/DirectXTex/DirectXTex.h"
 
 #ifdef USE_IMGUI
@@ -23,6 +25,7 @@
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #endif
 
+#pragma comment(lib, "xaudio2.lib")
 #pragma comment(lib, "dxcompiler.lib")
 #pragma comment(lib, "Dbghelp.lib")
 #pragma comment(lib, "d3d12.lib")
@@ -482,6 +485,111 @@ ModelData LoadObjFile(const std::string& directoryPath, const std::string& filen
     return modelData;
 }
 
+// チャンクヘッダ
+struct ChunkHeader
+{
+    char id[4];
+    int32_t size;
+};
+
+// RIFFヘッダチャンク
+struct RiffHeader
+{
+    ChunkHeader chunk;
+    char type[4];
+};
+
+// FMTチャンク
+struct FormatChunk
+{
+    ChunkHeader chunk;
+    WAVEFORMATEX fmt;
+};
+
+// 音声データ
+struct SoundData
+{
+    WAVEFORMATEX wfex;
+    BYTE* pBuffer;
+    unsigned int bufferSize;
+};
+
+// Waveファイルの読み込み
+SoundData SoundLoadWave(const char* filename)
+{
+    // 1.ファイルオープン
+    std::ifstream file;
+    file.open(filename, std::ios_base::binary);
+    assert(file.is_open());
+
+    // 2.wavデータ読み込み
+    RiffHeader riff;
+    file.read((char*)&riff, sizeof(riff));
+    if (strncmp(riff.chunk.id, "RIFF", 4) != 0) {
+        assert(0);
+    }
+    if (strncmp(riff.type, "WAVE", 4) != 0) {
+        assert(0);
+    }
+
+    FormatChunk format = {};
+    file.read((char*)&format, sizeof(ChunkHeader));
+    if (strncmp(format.chunk.id, "fmt ", 4) != 0) {
+        assert(0);
+    }
+    assert(format.chunk.size <= sizeof(format.fmt));
+    file.read((char*)&format.fmt, format.chunk.size);
+
+    ChunkHeader data;
+    file.read((char*)&data, sizeof(data));
+    if (strncmp(data.id, "JUNK", 4) == 0) {
+        file.seekg(data.size, std::ios_base::cur);
+        file.read((char*)&data, sizeof(data));
+    }
+
+    if (strncmp(data.id, "data", 4) != 0) {
+        assert(0);
+    }
+
+    char* pBuffer = new char[data.size];
+    file.read(pBuffer, data.size);
+
+    file.close();
+
+    SoundData soundData = {};
+    soundData.wfex = format.fmt;
+    soundData.pBuffer = reinterpret_cast<BYTE*>(pBuffer);
+    soundData.bufferSize = data.size;
+
+    return soundData;
+}
+
+// 音声データ開放
+void SoundUnload(SoundData* soundData)
+{
+    delete[] soundData->pBuffer;
+    soundData->pBuffer = 0;
+    soundData->bufferSize = 0;
+}
+
+// 音声再生
+void SoundPlayWave(IXAudio2* xAudio2, const SoundData& soundData)
+{
+    HRESULT hr;
+
+    IXAudio2SourceVoice* pSourceVoice = nullptr;
+    hr = xAudio2->CreateSourceVoice(&pSourceVoice, &soundData.wfex);
+    assert(SUCCEEDED(hr));
+
+    XAUDIO2_BUFFER buf{};
+    buf.pAudioData = soundData.pBuffer;
+    buf.AudioBytes = soundData.bufferSize;
+    buf.Flags = XAUDIO2_END_OF_STREAM;
+
+    hr = pSourceVoice->SubmitSourceBuffer(&buf);
+    hr = pSourceVoice->Start();
+}
+
 // リソースリークチェック用構造体
 struct D3DResourceLeakChecker {
     ~D3DResourceLeakChecker() {
@@ -497,7 +605,12 @@ struct D3DResourceLeakChecker {
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow) {
     (void)hPrevInstance; (void)lpCmdLine;
 
+    CoInitializeEx(0, COINIT_MULTITHREADED);
+
     D3DResourceLeakChecker leakCheck;
+
+    Microsoft::WRL::ComPtr<IXAudio2> xAudio2;
+    IXAudio2MasteringVoice* masterVoice = nullptr;
 
 #ifdef _DEBUG
     Microsoft::WRL::ComPtr<ID3D12Debug> debugController = nullptr;
@@ -519,6 +632,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     Microsoft::WRL::ComPtr<IDXGIFactory7> dxgiFactory = nullptr;
     hr = CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
     assert(SUCCEEDED(hr) && dxgiFactory != nullptr);
+    hr = XAudio2Create(&xAudio2, 0, XAUDIO2_DEFAULT_PROCESSOR);
+    assert(SUCCEEDED(hr));
+
+    hr = xAudio2->CreateMasteringVoice(&masterVoice);
+    assert(SUCCEEDED(hr));
 
     Microsoft::WRL::ComPtr<IDXGIAdapter4> useAdapter = nullptr;
     hr = dxgiFactory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&useAdapter));
@@ -834,6 +952,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     UINT64 fenceValue = 0;
 
     Transform uvTransformSprite{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+    SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
 
     Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
     Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.2967f, 0.0f, 0.0f}, {0.0f, 4.0f, -10.0f} };
@@ -859,6 +978,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             ImGui::SliderAngle("SphereRotateY", &transform.rotate.y);
             ImGui::SliderAngle("SphereRotateZ", &transform.rotate.z);
             ImGui::Checkbox("useMonsterBall", &useMonsterBall);
+            if (ImGui::Button("Play Sound")) {
+                SoundPlayWave(xAudio2.Get(), soundData1);
+            }
 
             ImGui::DragFloat2("UVTranslate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
             ImGui::DragFloat2("UVScale", &uvTransformSprite.scale.x, 0.01f, -10.0f, 10.0f);
@@ -987,6 +1109,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 #endif
 
     CloseHandle(fenceEvent);
+
+    masterVoice->DestroyVoice();
+    xAudio2.Reset();
+    SoundUnload(&soundData1);
+
+    CoUninitialize();
 
     return 0;
 }
