@@ -1,4 +1,3 @@
-
 #include <Windows.h>
 #include <cstdint>
 #include <string>
@@ -15,6 +14,8 @@
 #include <strsafe.h>
 #include <dxcapi.h>
 #include <xaudio2.h>
+#define DIRECTINPUT_VERSION 0x0800 // DirectInputのバージョン指定
+#include <dinput.h>
 #include "./externals/DirectXTex/DirectXTex.h"
 
 #ifdef USE_IMGUI
@@ -31,6 +32,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
+#pragma comment(lib, "dinput8.lib")
 
 struct Vector4 {
     float x, y, z, w;
@@ -957,6 +959,27 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
     Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.2967f, 0.0f, 0.0f}, {0.0f, 4.0f, -10.0f} };
 
+    // DirectInputの初期化
+    IDirectInput8* directInput = nullptr;
+    hr = DirectInput8Create(
+        hInstance, DIRECTINPUT_VERSION, IID_IDirectInput8,
+        (void**)&directInput, nullptr);
+    assert(SUCCEEDED(hr));
+
+    // キーボードデバイスの生成
+    IDirectInputDevice8* keyboard = nullptr;
+    hr = directInput->CreateDevice(GUID_SysKeyboard, &keyboard, NULL);
+    assert(SUCCEEDED(hr));
+
+    // 入力データ形式のセット
+    hr = keyboard->SetDataFormat(&c_dfDIKeyboard); // 標準形式
+    assert(SUCCEEDED(hr));
+
+    // 排他制御レベルのセット
+    hr = keyboard->SetCooperativeLevel(
+        hWnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE | DISCL_NOWINKEY);
+    assert(SUCCEEDED(hr));
+
     MSG msg{};
     while (msg.message != WM_QUIT) {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -964,6 +987,18 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             DispatchMessage(&msg);
         }
         else {
+            // キーボード情報の取得開始
+            keyboard->Acquire();
+
+            // 全キーの入力状態を取得する
+            BYTE key[256] = {};
+            keyboard->GetDeviceState(sizeof(key), key);
+
+            // 数字の0キーが押されていたら
+            if (key[DIK_0]) {
+                OutputDebugStringA("Hit 0\n"); // 出力ウィンドウに「Hit 0」と表示
+            }
+
 #ifdef USE_IMGUI
             ImGui_ImplDX12_NewFrame();
             ImGui_ImplWin32_NewFrame();
