@@ -65,7 +65,9 @@
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
     </Manifest>
     <PostBuildEvent>
-      <Command>
+      <Command>xcopy /y /d "$(ProjectDir)Object3d.VS.hlsl" "$(OutDir)"
+xcopy /y /d "$(ProjectDir)Object3d.PS.hlsl" "$(OutDir)"
+xcopy /y /d /s /i "$(ProjectDir)resources" "$(OutDir)resources"
       </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -90,11 +92,14 @@
       <EnableDpiAwareness>PerMonitorHighDPIAware</EnableDpiAwareness>
     </Manifest>
     <PostBuildEvent>
-      <Command>
+      <Command>xcopy /y /d "$(ProjectDir)Object3d.VS.hlsl" "$(OutDir)"
+xcopy /y /d "$(ProjectDir)Object3d.PS.hlsl" "$(OutDir)"
+xcopy /y /d /s /i "$(ProjectDir)resources" "$(OutDir)resources"
       </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="debugCamera.cpp" />
     <ClCompile Include="externals\imgui\imgui.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </ExcludedFromBuild>
@@ -143,6 +148,7 @@
     </FxCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="debugCamera.h" />
     <ClInclude Include="externals\imgui\imconfig.h" />
     <ClInclude Include="externals\imgui\imgui.h" />
     <ClInclude Include="externals\imgui\imgui_impl_dx12.h" />

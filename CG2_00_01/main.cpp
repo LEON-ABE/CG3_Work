@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <sstream>
+#include <vector>
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl.h>
@@ -14,7 +15,7 @@
 #include <strsafe.h>
 #include <dxcapi.h>
 #include <xaudio2.h>
-#define DIRECTINPUT_VERSION 0x0800 // DirectInputのバージョン指定
+#define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include "./externals/DirectXTex/DirectXTex.h"
 
@@ -201,6 +202,101 @@ Matrix4x4 MakePerspectiveFovMatrix(float fovY, float aspectRatio, float nearClip
     result.m[2][3] = 1.0f;
     result.m[3][2] = -nearClip * farClip / (farClip - nearClip);
     return result;
+}
+
+// Sprite用の正射影行列（スクリーン座標系）
+Matrix4x4 MakeOrthographicMatrix(float left, float top, float right, float bottom, float nearClip, float farClip) {
+    Matrix4x4 result{};
+    result.m[0][0] = 2.0f / (right - left);
+    result.m[1][1] = 2.0f / (top - bottom);
+    result.m[2][2] = 1.0f / (farClip - nearClip);
+    result.m[3][0] = (left + right) / (left - right);
+    result.m[3][1] = (top + bottom) / (bottom - top);
+    result.m[3][2] = nearClip / (nearClip - farClip);
+    result.m[3][3] = 1.0f;
+    return result;
+}
+
+// ベクトルを行列で変換（平行移動成分を無視。移動方向をカメラの向きに合わせるのに使う）
+Vector3 TransformNormal(const Vector3& v, const Matrix4x4& m) {
+    Vector3 result{
+        v.x * m.m[0][0] + v.y * m.m[1][0] + v.z * m.m[2][0],
+        v.x * m.m[0][1] + v.y * m.m[1][1] + v.z * m.m[2][1],
+        v.x * m.m[0][2] + v.y * m.m[1][2] + v.z * m.m[2][2],
+    };
+    return result;
+}
+
+// デバッグカメラ
+class DebugCamera {
+public:
+    void Initialize();
+    void Update(const BYTE* key);
+
+    const Matrix4x4& GetViewMatrix() const { return viewMatrix_; }
+    const Matrix4x4& GetProjectionMatrix() const { return projectionMatrix_; }
+
+private:
+    // X,Y,Z軸回りのローカル回転角
+    Vector3 rotation_ = { 0.0f, 0.0f, 0.0f };
+    // ローカル座標
+    Vector3 translation_ = { 0.0f, 0.0f, -50.0f };
+    // 累積回転行列
+    Matrix4x4 matRot_;
+    // ビュー行列
+    Matrix4x4 viewMatrix_;
+    // 射影行列
+    Matrix4x4 projectionMatrix_;
+};
+
+void DebugCamera::Initialize() {
+    // 累積回転行列を単位行列で初期化
+    matRot_ = MakeIdentity4x4();
+    // 射影行列（本編のカメラと同じパラメータ）
+    projectionMatrix_ = MakePerspectiveFovMatrix(0.45f, float(1280) / float(720), 0.1f, 100.0f);
+}
+
+void DebugCamera::Update(const BYTE* key) {
+    // ===== ① 入力によるカメラの移動・回転 =====
+
+    // --- 移動量（カメラのローカル空間） ---
+    // ※ 入力の割り当てと速度は「黄色ハイライト」＝自分で決める部分
+    const float speed = 0.2f;
+    Vector3 move = { 0.0f, 0.0f, 0.0f };
+    // 前後移動
+    if (key[DIK_W]) { move.z = speed; }
+    if (key[DIK_S]) { move.z = -speed; }
+    // 左右移動
+    if (key[DIK_D]) { move.x = speed; }
+    if (key[DIK_A]) { move.x = -speed; }
+    // 上下移動
+    if (key[DIK_E]) { move.y = speed; }
+    if (key[DIK_Q]) { move.y = -speed; }
+
+    // 移動ベクトルをカメラの向き（累積回転行列）で回転させてから座標に加算する
+    move = TransformNormal(move, matRot_);
+    translation_.x += move.x;
+    translation_.y += move.y;
+    translation_.z += move.z;
+
+    // --- 回転（回転行列の累積） ---
+    // ※ 回転速度・入力割り当ても自分で決める部分
+    const float rotSpeed = 0.02f;
+    Matrix4x4 matRotDelta = MakeIdentity4x4();
+    if (key[DIK_UP]) { matRotDelta = Multiply(matRotDelta, MakeRotateXMatrix(-rotSpeed)); }
+    if (key[DIK_DOWN]) { matRotDelta = Multiply(matRotDelta, MakeRotateXMatrix(rotSpeed)); }
+    if (key[DIK_LEFT]) { matRotDelta = Multiply(matRotDelta, MakeRotateYMatrix(-rotSpeed)); }
+    if (key[DIK_RIGHT]) { matRotDelta = Multiply(matRotDelta, MakeRotateYMatrix(rotSpeed)); }
+    // 累積回転行列 = 今回の追加回転行列 × 前回の累積回転行列
+    matRot_ = Multiply(matRotDelta, matRot_);
+
+    // ===== ② ビュー行列の更新 =====
+    // 座標から平行移動行列を計算
+    Matrix4x4 translateMatrix = MakeTranslateMatrix(translation_);
+    // 累積回転行列と平行移動行列からワールド行列を計算
+    Matrix4x4 cameraWorld = Multiply(matRot_, translateMatrix);
+    // ワールド行列の逆行列をビュー行列に代入
+    viewMatrix_ = Inverse(cameraWorld);
 }
 
 // ウィンドウプロシージャ
@@ -848,9 +944,36 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     Microsoft::WRL::ComPtr<ID3D12Resource> materialResource = CreateBufferResource(device, sizeof(Material));
     Microsoft::WRL::ComPtr<ID3D12Resource> wvpResource = CreateBufferResource(device, sizeof(TransformationMatrix));
     Microsoft::WRL::ComPtr<ID3D12Resource> transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(TransformationMatrix));
+    Microsoft::WRL::ComPtr<ID3D12Resource> materialResourceSprite = CreateBufferResource(device, sizeof(Material));
     Microsoft::WRL::ComPtr<ID3D12Resource> directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
 
+    Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceSprite = CreateBufferResource(device, sizeof(VertexData) * 4);
     Microsoft::WRL::ComPtr<ID3D12Resource> indexResourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
+
+    D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSprite{};
+    vertexBufferViewSprite.BufferLocation = vertexResourceSprite->GetGPUVirtualAddress();
+    vertexBufferViewSprite.SizeInBytes = sizeof(VertexData) * 4;
+    vertexBufferViewSprite.StrideInBytes = sizeof(VertexData);
+
+    VertexData* vertexDataSprite = nullptr;
+    vertexResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataSprite));
+    // 左下
+    vertexDataSprite[0].position = { 0.0f, 360.0f, 0.0f, 1.0f };
+    vertexDataSprite[0].texcoord = { 0.0f, 1.0f };
+    vertexDataSprite[0].normal = { 0.0f, 0.0f, -1.0f };
+    // 左上
+    vertexDataSprite[1].position = { 0.0f, 0.0f, 0.0f, 1.0f };
+    vertexDataSprite[1].texcoord = { 0.0f, 0.0f };
+    vertexDataSprite[1].normal = { 0.0f, 0.0f, -1.0f };
+    // 右下
+    vertexDataSprite[2].position = { 640.0f, 360.0f, 0.0f, 1.0f };
+    vertexDataSprite[2].texcoord = { 1.0f, 1.0f };
+    vertexDataSprite[2].normal = { 0.0f, 0.0f, -1.0f };
+    // 右上
+    vertexDataSprite[3].position = { 640.0f, 0.0f, 0.0f, 1.0f };
+    vertexDataSprite[3].texcoord = { 1.0f, 0.0f };
+    vertexDataSprite[3].normal = { 0.0f, 0.0f, -1.0f };
+    vertexResourceSprite->Unmap(0, nullptr);
 
     D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
     indexBufferViewSprite.BufferLocation = indexResourceSprite->GetGPUVirtualAddress();
@@ -887,6 +1010,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     materialData->enableLighting = 1;
     materialData->uvTransform = MakeIdentity4x4();
     materialResource->Unmap(0, nullptr);
+
+    Material* materialDataSprite = nullptr;
+    materialResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&materialDataSprite));
+    materialDataSprite->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
+    materialDataSprite->enableLighting = 0;
+    materialDataSprite->uvTransform = MakeIdentity4x4();
+    materialResourceSprite->Unmap(0, nullptr);
 
     TransformationMatrix* wvpData = nullptr;
     wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
@@ -958,6 +1088,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
     Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
     Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.2967f, 0.0f, 0.0f}, {0.0f, 4.0f, -10.0f} };
+    Transform spriteTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+
+    // デバッグカメラ（通常カメラと切り替えて使う）
+    DebugCamera debugCamera;
+    debugCamera.Initialize();
+    bool useDebugCamera = false;
 
     // DirectInputの初期化
     IDirectInput8* directInput = nullptr;
@@ -999,24 +1135,38 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 OutputDebugStringA("Hit 0\n"); // 出力ウィンドウに「Hit 0」と表示
             }
 
+            // デバッグカメラの更新（入力を渡して移動・回転・ビュー行列更新）
+            debugCamera.Update(key);
+
 #ifdef USE_IMGUI
             ImGui_ImplDX12_NewFrame();
             ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();
 
             ImGui::Begin("Window");
+            ImGui::Checkbox("useDebugCamera", &useDebugCamera);
             ImGui::DragFloat3("CameraTranslate", &cameraTransform.translate.x, 0.01f);
             ImGui::SliderAngle("CameraRotateX", &cameraTransform.rotate.x);
             ImGui::SliderAngle("CameraRotateY", &cameraTransform.rotate.y);
             ImGui::SliderAngle("CameraRotateZ", &cameraTransform.rotate.z);
-            ImGui::SliderAngle("SphereRotateX", &transform.rotate.x);
-            ImGui::SliderAngle("SphereRotateY", &transform.rotate.y);
-            ImGui::SliderAngle("SphereRotateZ", &transform.rotate.z);
+
+            ImGui::Separator();
+            ImGui::Text("Object (plane.obj)");
+            ImGui::DragFloat3("ObjectTranslate", &transform.translate.x, 0.01f);
+            ImGui::DragFloat3("ObjectScale", &transform.scale.x, 0.01f);
+            ImGui::SliderAngle("ObjectRotateX", &transform.rotate.x);
+            ImGui::SliderAngle("ObjectRotateY", &transform.rotate.y);
+            ImGui::SliderAngle("ObjectRotateZ", &transform.rotate.z);
             ImGui::Checkbox("useMonsterBall", &useMonsterBall);
             if (ImGui::Button("Play Sound")) {
                 SoundPlayWave(xAudio2.Get(), soundData1);
             }
 
+            ImGui::Separator();
+            ImGui::Text("Sprite");
+            ImGui::DragFloat3("SpriteTranslate", &spriteTransform.translate.x, 1.0f);
+            ImGui::DragFloat3("SpriteScale", &spriteTransform.scale.x, 0.01f);
+            ImGui::SliderAngle("SpriteRotateZ", &spriteTransform.rotate.z);
             ImGui::DragFloat2("UVTranslate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
             ImGui::DragFloat2("UVScale", &uvTransformSprite.scale.x, 0.01f, -10.0f, 10.0f);
             ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
@@ -1037,9 +1187,21 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             uvTransformMatrix = Multiply(uvTransformMatrix, matTranslate);
 
             Matrix4x4 worldMatrix = MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
-            Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
-            Matrix4x4 viewMatrix = Inverse(cameraMatrix);
-            Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(1280) / float(720), 0.1f, 100.0f);
+
+            Matrix4x4 viewMatrix;
+            Matrix4x4 projectionMatrix;
+            if (useDebugCamera) {
+                // デバッグカメラのビュー・射影行列を使う
+                viewMatrix = debugCamera.GetViewMatrix();
+                projectionMatrix = debugCamera.GetProjectionMatrix();
+            }
+            else {
+                // 通常カメラ
+                Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
+                viewMatrix = Inverse(cameraMatrix);
+                projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(1280) / float(720), 0.1f, 100.0f);
+            }
+
             Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
 
             TransformationMatrix* wvpDataFrame = nullptr;
@@ -1047,6 +1209,19 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 wvpDataFrame->WVP = worldViewProjectionMatrix;
                 wvpDataFrame->World = worldMatrix;
                 wvpResource->Unmap(0, nullptr);
+            }
+
+            // Sprite用のWVP（スクリーン座標系の正射影）
+            Matrix4x4 spriteWorldMatrix = MakeAffineMatrix(spriteTransform.scale, spriteTransform.rotate, spriteTransform.translate);
+            Matrix4x4 spriteViewMatrix = MakeIdentity4x4();
+            Matrix4x4 spriteProjectionMatrix = MakeOrthographicMatrix(0.0f, 0.0f, 1280.0f, 720.0f, 0.0f, 100.0f);
+            Matrix4x4 spriteWorldViewProjectionMatrix = Multiply(spriteWorldMatrix, Multiply(spriteViewMatrix, spriteProjectionMatrix));
+
+            TransformationMatrix* wvpDataFrameSprite = nullptr;
+            if (SUCCEEDED(transformationMatrixResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&wvpDataFrameSprite)))) {
+                wvpDataFrameSprite->WVP = spriteWorldViewProjectionMatrix;
+                wvpDataFrameSprite->World = spriteWorldMatrix;
+                transformationMatrixResourceSprite->Unmap(0, nullptr);
             }
 
             ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorHeap.Get() };
@@ -1083,8 +1258,16 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             if (SUCCEEDED(materialResource->Map(0, nullptr, reinterpret_cast<void**>(&matMap)))) {
                 matMap->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
                 matMap->enableLighting = 1;
-                matMap->uvTransform = uvTransformMatrix;
+                matMap->uvTransform = MakeIdentity4x4();
                 materialResource->Unmap(0, nullptr);
+            }
+
+            Material* matMapSprite = nullptr;
+            if (SUCCEEDED(materialResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&matMapSprite)))) {
+                matMapSprite->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                matMapSprite->enableLighting = 0;
+                matMapSprite->uvTransform = uvTransformMatrix;
+                materialResourceSprite->Unmap(0, nullptr);
             }
 
             commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress());
@@ -1102,6 +1285,13 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 
             commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
+
+            // Spriteの描画
+            commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
+            commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
+            commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
+            commandList->IASetIndexBuffer(&indexBufferViewSprite);
+            commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 #ifdef USE_IMGUI
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
