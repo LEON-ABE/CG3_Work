@@ -204,7 +204,7 @@ Matrix4x4 MakePerspectiveFovMatrix(float fovY, float aspectRatio, float nearClip
     return result;
 }
 
-// Sprite用の正射影行列（スクリーン座標系）
+// Sprite用の正射影行列
 Matrix4x4 MakeOrthographicMatrix(float left, float top, float right, float bottom, float nearClip, float farClip) {
     Matrix4x4 result{};
     result.m[0][0] = 2.0f / (right - left);
@@ -217,7 +217,7 @@ Matrix4x4 MakeOrthographicMatrix(float left, float top, float right, float botto
     return result;
 }
 
-// ベクトルを行列で変換（平行移動成分を無視。移動方向をカメラの向きに合わせるのに使う）
+// ベクトルを行列で変換
 Vector3 TransformNormal(const Vector3& v, const Matrix4x4& m) {
     Vector3 result{
         v.x * m.m[0][0] + v.y * m.m[1][0] + v.z * m.m[2][0],
@@ -252,15 +252,13 @@ private:
 void DebugCamera::Initialize() {
     // 累積回転行列を単位行列で初期化
     matRot_ = MakeIdentity4x4();
-    // 射影行列（本編のカメラと同じパラメータ）
+    // 射影行列
     projectionMatrix_ = MakePerspectiveFovMatrix(0.45f, float(1280) / float(720), 0.1f, 100.0f);
 }
 
 void DebugCamera::Update(const BYTE* key) {
-    // ===== ① 入力によるカメラの移動・回転 =====
-
-    // --- 移動量（カメラのローカル空間） ---
-    // ※ 入力の割り当てと速度は「黄色ハイライト」＝自分で決める部分
+    
+    //入力の割り当てと速度は「黄色ハイライト」＝自分で決める部分
     const float speed = 0.2f;
     Vector3 move = { 0.0f, 0.0f, 0.0f };
     // 前後移動
@@ -273,14 +271,14 @@ void DebugCamera::Update(const BYTE* key) {
     if (key[DIK_E]) { move.y = speed; }
     if (key[DIK_Q]) { move.y = -speed; }
 
-    // 移動ベクトルをカメラの向き（累積回転行列）で回転させてから座標に加算する
+    // 移動ベクトルをカメラの向きで回転させてから座標に加算する
     move = TransformNormal(move, matRot_);
     translation_.x += move.x;
     translation_.y += move.y;
     translation_.z += move.z;
 
-    // --- 回転（回転行列の累積） ---
-    // ※ 回転速度・入力割り当ても自分で決める部分
+    
+    //回転速度・入力割り当ても自分で決める部分
     const float rotSpeed = 0.02f;
     Matrix4x4 matRotDelta = MakeIdentity4x4();
     if (key[DIK_UP]) { matRotDelta = Multiply(matRotDelta, MakeRotateXMatrix(-rotSpeed)); }
@@ -290,7 +288,6 @@ void DebugCamera::Update(const BYTE* key) {
     // 累積回転行列 = 今回の追加回転行列 × 前回の累積回転行列
     matRot_ = Multiply(matRotDelta, matRot_);
 
-    // ===== ② ビュー行列の更新 =====
     // 座標から平行移動行列を計算
     Matrix4x4 translateMatrix = MakeTranslateMatrix(translation_);
     // 累積回転行列と平行移動行列からワールド行列を計算
@@ -1090,7 +1087,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.2967f, 0.0f, 0.0f}, {0.0f, 4.0f, -10.0f} };
     Transform spriteTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
 
-    // デバッグカメラ（通常カメラと切り替えて使う）
+    // デバッグカメラ
     DebugCamera debugCamera;
     debugCamera.Initialize();
     bool useDebugCamera = false;
@@ -1108,7 +1105,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     assert(SUCCEEDED(hr));
 
     // 入力データ形式のセット
-    hr = keyboard->SetDataFormat(&c_dfDIKeyboard); // 標準形式
+    hr = keyboard->SetDataFormat(&c_dfDIKeyboard); //標準形式
     assert(SUCCEEDED(hr));
 
     // 排他制御レベルのセット
@@ -1132,10 +1129,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
             // 数字の0キーが押されていたら
             if (key[DIK_0]) {
-                OutputDebugStringA("Hit 0\n"); // 出力ウィンドウに「Hit 0」と表示
+                OutputDebugStringA("Hit 0\n"); 
             }
 
-            // デバッグカメラの更新（入力を渡して移動・回転・ビュー行列更新）
+            // デバッグカメラの更新
             debugCamera.Update(key);
 
 #ifdef USE_IMGUI
@@ -1211,7 +1208,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 wvpResource->Unmap(0, nullptr);
             }
 
-            // Sprite用のWVP（スクリーン座標系の正射影）
+            // Sprite用のWVP
             Matrix4x4 spriteWorldMatrix = MakeAffineMatrix(spriteTransform.scale, spriteTransform.rotate, spriteTransform.translate);
             Matrix4x4 spriteViewMatrix = MakeIdentity4x4();
             Matrix4x4 spriteProjectionMatrix = MakeOrthographicMatrix(0.0f, 0.0f, 1280.0f, 720.0f, 0.0f, 100.0f);
