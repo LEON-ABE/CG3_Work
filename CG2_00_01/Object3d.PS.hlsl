@@ -14,7 +14,7 @@ struct DirectionalLight
 };
 
 ConstantBuffer<Material> gMaterial : register(b0);
-ConstantBuffer<DirectionalLight> gDirectionalLight : register(b1);
+ConstantBuffer<DirectionalLight> gDirectionalLight : register(b2);
 
 Texture2D<float4> gTexture : register(t0);
 SamplerState gSampler : register(s0);
@@ -32,13 +32,21 @@ float4 main(VertexShaderOutput input) : SV_TARGET
     
     //サンプリング
     float4 textureColor = gTexture.Sample(gSampler, transformedUV.xy);
+
+    // textureのα値が0.5以下のときにPixelを棄却
+    if (textureColor.a <= 0.5f)
+    {
+        discard;
+    }
+
     float4 finalColor = gMaterial.color * textureColor;
     
     if (gMaterial.enableLighting != 0)
     {
         float NdotL = dot(normalize(input.normal), -gDirectionalLight.direction);
         float cos = pow(NdotL * 0.5f + 0.5f, 2.0f);
-        finalColor = gMaterial.color * gDirectionalLight.color * cos * gDirectionalLight.intensity * textureColor;
+        finalColor.rgb = gMaterial.color.rgb * textureColor.rgb * gDirectionalLight.color.rgb * cos * gDirectionalLight.intensity;
+        finalColor.a = gMaterial.color.a * textureColor.a;
     }
     
     return finalColor;

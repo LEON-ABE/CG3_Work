@@ -90,6 +90,23 @@ struct Transform {
     Vector3 translate;
 };
 
+enum BlendMode {
+    //!< ブレンドなし
+    kBlendModeNone,
+    //!< 通常αブレンド。デフォルト。 Src * SrcA + Dest * (1 - SrcA)
+    kBlendModeNormal,
+    //!< 加算。Src * SrcA + Dest * 1
+    kBlendModeAdd,
+    //!< 減算。Dest * 1 - Src * SrcA
+    kBlendModeSubtract,
+    //!< 乗算。Src * 0 + Dest * Src
+    kBlendModeMultily,
+    //!< スクリーン。Src * (1 - Dest) + Dest * 1
+    kBlendModeScreen,
+    // 利用してはいけない
+    kCountOfBlendMode,
+};
+
 Matrix4x4 MakeIdentity4x4() {
     Matrix4x4 result{};
     for (int i = 0; i < 4; ++i) result.m[i][i] = 1.0f;
@@ -242,11 +259,11 @@ private:
     // ローカル座標
     Vector3 translation_ = { 0.0f, 0.0f, -50.0f };
     // 累積回転行列
-    Matrix4x4 matRot_;
+    Matrix4x4 matRot_{};
     // ビュー行列
-    Matrix4x4 viewMatrix_;
+    Matrix4x4 viewMatrix_{};
     // 射影行列
-    Matrix4x4 projectionMatrix_;
+    Matrix4x4 projectionMatrix_{};
 };
 
 void DebugCamera::Initialize() {
@@ -257,8 +274,8 @@ void DebugCamera::Initialize() {
 }
 
 void DebugCamera::Update(const BYTE* key) {
-    
-    //入力の割り当てと速度は「黄色ハイライト」＝自分で決める部分
+
+    //入力の割り当てと速度は黄色＝自分で決める部分
     const float speed = 0.2f;
     Vector3 move = { 0.0f, 0.0f, 0.0f };
     // 前後移動
@@ -277,7 +294,7 @@ void DebugCamera::Update(const BYTE* key) {
     translation_.y += move.y;
     translation_.z += move.z;
 
-    
+
     //回転速度・入力割り当ても自分で決める部分
     const float rotSpeed = 0.02f;
     Matrix4x4 matRotDelta = MakeIdentity4x4();
@@ -700,7 +717,8 @@ struct D3DResourceLeakChecker {
 int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPSTR lpCmdLine, _In_ int nCmdShow) {
     (void)hPrevInstance; (void)lpCmdLine;
 
-    CoInitializeEx(0, COINIT_MULTITHREADED);
+    HRESULT hrCoInit = CoInitializeEx(0, COINIT_MULTITHREADED);
+    assert(SUCCEEDED(hrCoInit));
 
     D3DResourceLeakChecker leakCheck;
 
@@ -781,11 +799,16 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     assert(SUCCEEDED(hr) && rtvDescriptorHeap != nullptr);
 
     UINT rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    // RTVはSRGBで作成(書き込み時にガンマ補正される)
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc{};
+    rtvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandleStart = rtvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
     for (UINT i = 0; i < 2; ++i) {
         D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHandleStart;
         rtvHandle.ptr += rtvDescriptorSize * i;
-        device->CreateRenderTargetView(swapChainResources[i].Get(), nullptr, rtvHandle);
+        device->CreateRenderTargetView(swapChainResources[i].Get(), &rtvDesc, rtvHandle);
     }
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvDescriptorHeap = nullptr;
@@ -859,7 +882,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 
     rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    rootParameters[2].Descriptor.ShaderRegister = 1;
+    rootParameters[2].Descriptor.ShaderRegister = 2;
     rootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     rootParameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -917,7 +940,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
     psoDesc.VS = { vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize() };
     psoDesc.PS = { pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize() };
-    psoDesc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+
     psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
     psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
     psoDesc.DepthStencilState.DepthEnable = TRUE;
@@ -927,15 +950,57 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     psoDesc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     psoDesc.SampleDesc.Count = 1;
 
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> graphicsPipelineState = nullptr;
-    hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&graphicsPipelineState));
-    assert(SUCCEEDED(hr));
+    // BlendStateの設定CG3 (BlendModeごとにPSOを作る)
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> graphicsPipelineStates[kCountOfBlendMode];
+    for (int i = 0; i < kCountOfBlendMode; ++i) {
+        D3D12_BLEND_DESC blendDesc{};
+        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        blendDesc.RenderTarget[0].BlendEnable = TRUE;
+        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+        blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+
+        switch (i) {
+        case kBlendModeNone:
+            blendDesc.RenderTarget[0].BlendEnable = FALSE;
+            break;
+        case kBlendModeNormal:
+            blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+            blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+            break;
+        case kBlendModeAdd:
+            blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+            blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+            break;
+        case kBlendModeSubtract:
+            blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+            blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_REV_SUBTRACT;
+            blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+            break;
+        case kBlendModeMultily:
+            blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ZERO;
+            blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_SRC_COLOR;
+            break;
+        case kBlendModeScreen:
+            blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_INV_DEST_COLOR;
+            blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+            break;
+        }
+
+        psoDesc.BlendState = blendDesc;
+        hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&graphicsPipelineStates[i]));
+        assert(SUCCEEDED(hr));
+    }
 
 
-    ModelData modelData = LoadObjFile("resources", "plane.obj");
+    ModelData modelData = LoadObjFile("resources", "fence.obj");
 
     Microsoft::WRL::ComPtr<ID3D12Resource> vertexResource = CreateBufferResource(device, sizeof(VertexData) * modelData.vertices.size());
     Microsoft::WRL::ComPtr<ID3D12Resource> materialResource = CreateBufferResource(device, sizeof(Material));
@@ -1045,45 +1110,25 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     srvHandleCPU.ptr += descriptorSizeSRV * 1;
     device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvHandleCPU);
 
-    DirectX::ScratchImage mipImages2 = LoadTexture(L"resources/monsterBall.png");
-    const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
-    Microsoft::WRL::ComPtr<ID3D12Resource> textureResource2 = CreateTextureResource(device, metadata2);
-
-    commandAllocator->Reset();
-    commandList->Reset(commandAllocator.Get(), nullptr);
-    UploadTextureData(textureResource2, mipImages2, device, commandList);
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc2{};
-    srvDesc2.Format = metadata2.format;
-    srvDesc2.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc2.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srvDesc2.Texture2D.MipLevels = static_cast<UINT>(metadata2.mipLevels);
-
-    D3D12_CPU_DESCRIPTOR_HANDLE srvHandleCPU2 = srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-    srvHandleCPU2.ptr += descriptorSizeSRV * 2;
-    device->CreateShaderResourceView(textureResource2.Get(), &srvDesc2, srvHandleCPU2);
-
     D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPU = srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
     textureSrvHandleGPU.ptr += descriptorSizeSRV * 1;
-
-    D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPU2 = srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-    textureSrvHandleGPU2.ptr += descriptorSizeSRV * 2;
 
 #ifdef USE_IMGUI
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGui_ImplWin32_Init(hWnd);
-    ImGui_ImplDX12_Init(device.Get(), 2, DXGI_FORMAT_R8G8B8A8_UNORM, srvDescriptorHeap.Get(), srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    ImGui_ImplDX12_Init(device.Get(), 2, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,srvDescriptorHeap.Get(), srvDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), srvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 #endif
 
-    bool useMonsterBall = false;
+    int blendMode = kBlendModeNormal;
     UINT64 fenceValue = 0;
 
     Transform uvTransformSprite{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
     SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
 
     Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+    Vector4 materialColor{ 1.0f, 1.0f, 1.0f, 1.0f };
     Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.2967f, 0.0f, 0.0f}, {0.0f, 4.0f, -10.0f} };
     Transform spriteTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
 
@@ -1129,7 +1174,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
             // 数字の0キーが押されていたら
             if (key[DIK_0]) {
-                OutputDebugStringA("Hit 0\n"); 
+                OutputDebugStringA("Hit 0\n");
             }
 
             // デバッグカメラの更新
@@ -1148,13 +1193,15 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             ImGui::SliderAngle("CameraRotateZ", &cameraTransform.rotate.z);
 
             ImGui::Separator();
-            ImGui::Text("Object (plane.obj)");
+            ImGui::Text("Object (fence.obj)");
             ImGui::DragFloat3("ObjectTranslate", &transform.translate.x, 0.01f);
             ImGui::DragFloat3("ObjectScale", &transform.scale.x, 0.01f);
             ImGui::SliderAngle("ObjectRotateX", &transform.rotate.x);
             ImGui::SliderAngle("ObjectRotateY", &transform.rotate.y);
             ImGui::SliderAngle("ObjectRotateZ", &transform.rotate.z);
-            ImGui::Checkbox("useMonsterBall", &useMonsterBall);
+            ImGui::ColorEdit4("color", &materialColor.x);
+            const char* blendModeNames[] = { "kBlendModeNone", "kBlendModeNormal", "kBlendModeAdd", "kBlendModeSubtract", "kBlendModeMultily", "kBlendModeScreen" };
+            ImGui::Combo("Blend", &blendMode, blendModeNames, IM_ARRAYSIZE(blendModeNames));
             if (ImGui::Button("Play Sound")) {
                 SoundPlayWave(xAudio2.Get(), soundData1);
             }
@@ -1225,7 +1272,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
             commandList->SetGraphicsRootSignature(rootSignature.Get());
-            commandList->SetPipelineState(graphicsPipelineState.Get());
+            commandList->SetPipelineState(graphicsPipelineStates[blendMode].Get());
 
             D3D12_VIEWPORT viewport{ 0.0f, 0.0f, 1280.0f, 720.0f, 0.0f, 1.0f };
             D3D12_RECT scissorRect{ 0, 0, 1280, 720 };
@@ -1253,7 +1300,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
             Material* matMap = nullptr;
             if (SUCCEEDED(materialResource->Map(0, nullptr, reinterpret_cast<void**>(&matMap)))) {
-                matMap->color = Vector4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                matMap->color = materialColor;
                 matMap->enableLighting = 1;
                 matMap->uvTransform = MakeIdentity4x4();
                 materialResource->Unmap(0, nullptr);
@@ -1271,24 +1318,19 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
             commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress());
             commandList->SetGraphicsRootConstantBufferView(2, directionalLightResource->GetGPUVirtualAddress());
 
-            if (useMonsterBall) {
-                commandList->SetGraphicsRootDescriptorTable(3, textureSrvHandleGPU2);
-            }
-            else {
-                commandList->SetGraphicsRootDescriptorTable(3, textureSrvHandleGPU);
-            }
+            commandList->SetGraphicsRootDescriptorTable(3, textureSrvHandleGPU);
 
             commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
 
             commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
 
-            // Spriteの描画
-            commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
-            commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
-            commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
-            commandList->IASetIndexBuffer(&indexBufferViewSprite);
-            commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+            // Spriteの描画(非表示)
+            //commandList->SetGraphicsRootConstantBufferView(0, materialResourceSprite->GetGPUVirtualAddress());
+            //commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
+            //commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);
+            //commandList->IASetIndexBuffer(&indexBufferViewSprite);
+            //commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 #ifdef USE_IMGUI
             ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList.Get());
